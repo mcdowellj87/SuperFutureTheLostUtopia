@@ -1,0 +1,5 @@
+# Assets (kept in private repo)
+assets/
+
+.DS_Store
+Thumbs.db
