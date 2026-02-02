@@ -1350,6 +1350,7 @@
     const MAP_URL = './images/map.png';
     const MEZZA_WALK_GLB = './assets/mezza_walking.glb';
     const MEZZA_RUN_GLB = './assets/mezza_running.glb';
+    const MEZZA_IDLE_GLB = './assets/mezza_idle.glb';
 
     /* =========================
        AUDIO (walking footsteps only)
@@ -2973,17 +2974,25 @@ const h = new Float32Array(mapW * mapH);
 
     let mezzaFallbackBuilt = false;
     function ensureMezzaReady() {
-      if (mezzaWalk || mezzaRun || mezzaFallbackBuilt) return;
+      if (mezzaWalk || mezzaRun || mezzaIdle || mezzaFallbackBuilt) return;
 
+      mezzaIdle = makeFallbackMezzaPrism();
       mezzaWalk = makeFallbackMezzaPrism();
       mezzaRun = makeFallbackMezzaPrism();
+
+      // Default state: idle
+      mezzaIdle.visible = true;
+      mezzaWalk.visible = false;
       mezzaRun.visible = false;
 
+      mezzaRoot.add(mezzaIdle);
       mezzaRoot.add(mezzaWalk);
       mezzaRoot.add(mezzaRun);
 
+      mezzaIdleMixer = null;
       mezzaWalkMixer = null;
       mezzaRunMixer = null;
+      mezzaIdleAction = null;
       mezzaWalkAction = null;
       mezzaRunAction = null;
 
@@ -2998,19 +3007,45 @@ const h = new Float32Array(mapW * mapH);
 
     let mezzaWalk = null;
     let mezzaRun = null;
+    let mezzaIdle = null;
     let mezzaWalkMixer = null;
     let mezzaRunMixer = null;
+    let mezzaIdleMixer = null;
     let mezzaWalkAction = null;
     let mezzaRunAction = null;
+    let mezzaIdleAction = null;
 
     const loader = new GLTFLoader();
 
     async function loadMezza() {
-      // Walking (also used for idle)
+      // Idle (when not moving)
+      const gltfIdle = await safeLoad('Mezza idle GLB', MEZZA_IDLE_GLB, (u) => loader.loadAsync(u));
+      if (gltfIdle && gltfIdle.scene) {
+        mezzaIdle = gltfIdle.scene;
+        mezzaIdle.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        // Default state is idle
+        mezzaIdle.visible = true;
+        mezzaRoot.add(mezzaIdle);
+
+        mezzaIdleMixer = new THREE.AnimationMixer(mezzaIdle);
+        if (gltfIdle.animations && gltfIdle.animations.length) {
+          mezzaIdleAction = mezzaIdleMixer.clipAction(gltfIdle.animations[0]);
+          mezzaIdleAction.play();
+        }
+      } else {
+        // If idle GLB fails, we'll fall back to walk-as-idle via setMezzaMode()
+        mezzaIdle = null;
+        mezzaIdleMixer = null;
+        mezzaIdleAction = null;
+      }
+
+      // Walking
       const gltfWalk = await safeLoad('Mezza walk GLB', MEZZA_WALK_GLB, (u) => loader.loadAsync(u));
       if (gltfWalk && gltfWalk.scene) {
         mezzaWalk = gltfWalk.scene;
         mezzaWalk.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        // Start hidden until we actually move (or until idle is missing)
+        mezzaWalk.visible = !mezzaIdle;
         mezzaRoot.add(mezzaWalk);
 
         mezzaWalkMixer = new THREE.AnimationMixer(mezzaWalk);
@@ -3020,12 +3055,14 @@ const h = new Float32Array(mapW * mapH);
         }
       } else {
         mezzaWalk = makeFallbackMezzaPrism();
+        // If idle exists, keep walk hidden by default
+        mezzaWalk.visible = !mezzaIdle;
         mezzaRoot.add(mezzaWalk);
         mezzaWalkMixer = null;
         mezzaWalkAction = null;
       }
 
-      // Running (separate GLB, swap visible)
+      // Running
       const gltfRun = await safeLoad('Mezza run GLB', MEZZA_RUN_GLB, (u) => loader.loadAsync(u));
       if (gltfRun && gltfRun.scene) {
         mezzaRun = gltfRun.scene;
@@ -3047,9 +3084,27 @@ const h = new Float32Array(mapW * mapH);
       }
     }
 
-    function setMezzaMode(isRunning) {
+    function setMezzaMode(isRunning, moving) {
       ensureMezzaReady();
       if (!mezzaWalk || !mezzaRun) return;
+
+      // If we don't have a dedicated idle model, use walk as idle for now.
+      const hasIdle = !!mezzaIdle;
+
+      if (!moving) {
+        if (hasIdle) {
+          mezzaIdle.visible = true;
+          mezzaWalk.visible = false;
+          mezzaRun.visible = false;
+        } else {
+          mezzaWalk.visible = true;
+          mezzaRun.visible = false;
+        }
+        return;
+      }
+
+      // Moving
+      if (hasIdle) mezzaIdle.visible = false;
       mezzaWalk.visible = !isRunning;
       mezzaRun.visible = isRunning;
     }
@@ -3556,7 +3611,7 @@ const h = new Float32Array(mapW * mapH);
       const moving = (keys.has('KeyW') || keys.has('KeyA') || keys.has('KeyS') || keys.has('KeyD'));
 
       // Switch models: walking GLB for idle+walk, running GLB for sprint+move
-      setMezzaMode(sprint && moving);
+      setMezzaMode(sprint && moving, moving);
 
       // Mezza follows the capsule feet so jump is visible (not locked to terrain height)
       const footY = playerPos.y - PLAYER_EYE_HEIGHT;
@@ -3576,6 +3631,7 @@ const h = new Float32Array(mapW * mapH);
       setMezzaVisible(VIEW_MODE === 'third');
 
       // Update mixers (safe even when null)
+      if (mezzaIdleMixer && mezzaIdle && mezzaIdle.visible) mezzaIdleMixer.update(dt);
       if (mezzaWalkMixer && mezzaWalk && mezzaWalk.visible) mezzaWalkMixer.update(dt);
       if (mezzaRunMixer && mezzaRun && mezzaRun.visible) mezzaRunMixer.update(dt);
 
