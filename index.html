@@ -1649,11 +1649,11 @@
 
     /* Terrain */
     const TOON_RAMP_TUNDRA = makeToonRamp5([
-      '#16161a',
-      '#2a2a31',
-      '#444452',
-      '#6f6f80',
-      '#f2f2f4'
+      '#051E11', // deep conifer shadow
+      '#0b3a22',
+      '#155f38',
+      '#4fa06a',
+      '#cfeee0'  // sunlit grass highlight
     ]);
 
     /* Sea */
@@ -1672,7 +1672,7 @@
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x120506);
+    scene.background = new THREE.Color('#3ad7ff');
     scene.fog = new THREE.Fog(0x2a0809, 8000, 30000);
 
     const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 60000);
@@ -1714,13 +1714,13 @@
     ========================= */
     scene.add(new THREE.AmbientLight(0xffffff, 0.08));
 
-    const sun = new THREE.DirectionalLight(0xff3a2a, 3.1);
+    const sun = new THREE.DirectionalLight(0xffffff, 3.1);
     sun.position.set(-2200, 700, 200);
     sun.target.position.set(0, 0, 0);
     scene.add(sun);
     scene.add(sun.target);
 
-    const fill = new THREE.DirectionalLight(0x6aa0ff, 0.12);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.12);
     fill.position.set(900, 1200, -600);
     scene.add(fill);
 
@@ -1738,11 +1738,11 @@
       const ctx = skyCanvas.getContext('2d');
 
       const grad = ctx.createLinearGradient(0, 0, 0, 256);
-      grad.addColorStop(0.00, '#120506');
-      grad.addColorStop(0.40, '#2a0809');
-      grad.addColorStop(0.70, '#5a1213');
-      grad.addColorStop(0.90, '#b3231f');
-      grad.addColorStop(1.00, '#ff3a2a');
+      grad.addColorStop(0.00, '#0b2a3a');
+      grad.addColorStop(0.40, '#1f6fa1');
+      grad.addColorStop(0.70, '#3ad7ff');
+      grad.addColorStop(0.90, '#7fe9ff');
+      grad.addColorStop(1.00, '#ffffff');
 
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, 32, 256);
@@ -1768,7 +1768,7 @@
       const SUN_DIST = 14000;
 
       const sunGeo = new THREE.SphereGeometry(SUN_RADIUS, 32, 16);
-      const sunMat = new THREE.MeshBasicMaterial({ color: 0xff3a2a, fog: false });
+      const sunMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
       horizonSunMesh = new THREE.Mesh(sunGeo, sunMat);
       scene.add(horizonSunMesh);
 
@@ -2209,7 +2209,7 @@ const h = new Float32Array(mapW * mapH);
       geo.rotateX(-Math.PI / 2);
 
       const mat = new THREE.MeshToonMaterial({
-        color: 0xff3a2a,
+        color: 0xffffff,
         gradientMap: TOON_RAMP_SEA_RED,
         emissive: 0x2a0000,
         emissiveIntensity: 0.55,
