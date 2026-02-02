@@ -1452,11 +1452,11 @@
     const BASE_MAX_HEIGHT = 140.0;
     const HEIGHT_CURVE_POW = 0.85;
 
-    const PLAYER_SCALE = 2.0;
+    const PLAYER_SCALE = 25.0; // was 2.0 — Mezza is 10x smaller
     const BASE_EYE_HEIGHT = 1.7;
     const PLAYER_EYE_HEIGHT = BASE_EYE_HEIGHT * PLAYER_SCALE;
 
-    const SPEED_WALK = 10.0;
+    const SPEED_WALK = 3.0;
     const SPRINT_SPEED_MODIFIER = 5;
     const SPEED_SPRINT = 16.0 * SPRINT_SPEED_MODIFIER;
 
@@ -1518,13 +1518,17 @@
        THIRD PERSON CAMERA
     ========================= */
     let VIEW_MODE = 'third'; // 'first' | 'third'  (default: third-person)
-    let THIRD_CAM_BACK = 9.0 * PLAYER_SCALE; // <-- mutable for mousewheel zoom
-    const THIRD_CAM_BACK_MIN = 2.2 * PLAYER_SCALE;
-    const THIRD_CAM_BACK_MAX = 40.0 * PLAYER_SCALE;
-    const THIRD_CAM_ZOOM_SPEED = 0.02 * PLAYER_SCALE;
 
-    const THIRD_CAM_UP = 3.2 * PLAYER_SCALE;
-    const THIRD_LOOK_UP = 1.35 * PLAYER_SCALE; // look-at height above ground
+    // Zoom the default third-person camera in (keep the same angle by scaling back+up+look together)
+    const THIRD_CAM_ZOOM_FACTOR = 0.025; // 5x closer than before
+
+    let THIRD_CAM_BACK = 9.0 * PLAYER_SCALE * THIRD_CAM_ZOOM_FACTOR; // <-- mutable for mousewheel zoom
+    const THIRD_CAM_BACK_MIN = 2.2 * PLAYER_SCALE * THIRD_CAM_ZOOM_FACTOR;
+    const THIRD_CAM_BACK_MAX = 40.0 * PLAYER_SCALE * THIRD_CAM_ZOOM_FACTOR;
+    const THIRD_CAM_ZOOM_SPEED = 0.02 * PLAYER_SCALE * THIRD_CAM_ZOOM_FACTOR;
+
+    const THIRD_CAM_UP = 5.0 * PLAYER_SCALE * THIRD_CAM_ZOOM_FACTOR;
+    const THIRD_LOOK_UP = 1.8 * PLAYER_SCALE * THIRD_CAM_ZOOM_FACTOR // look-at height above ground
     const THIRD_COLLIDE_PADDING = 0.22;
 
     /* =========================
@@ -1544,7 +1548,7 @@
     /* =========================
        TREE PARAMS (needed by blob-literal trees)
     ========================= */
-    const TREE_SCALE = 10.0;
+    const TREE_SCALE = 2.0;
     const TREE_TRUNK_H_BASE = 2.6 * TREE_SCALE;
     const TREE_TRUNK_R_BASE = 0.18 * TREE_SCALE;
     const TREE_TRUNK_TOP_R_BASE = 0.015 * TREE_SCALE;
