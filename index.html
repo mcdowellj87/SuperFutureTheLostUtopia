@@ -1377,6 +1377,9 @@
 
     let footLoading = false; // add near your other foot vars
 
+    //Controls the gradients of green for all hills.
+    const brightestHillColor = '#2ED07B';
+
     async function ensureFootstepsReady() {
       if (footReady || footLoading) return footReady;
       footLoading = true;
@@ -1714,13 +1717,13 @@
     ========================= */
     scene.add(new THREE.AmbientLight(0xffffff, 0.08));
 
-    const sun = new THREE.DirectionalLight(0xffffff, 3.1);
+    const sun  = new THREE.DirectionalLight(new THREE.Color(brightestHillColor), 3.1);
     sun.position.set(-2200, 700, 200);
     sun.target.position.set(0, 0, 0);
     scene.add(sun);
     scene.add(sun.target);
 
-    const fill = new THREE.DirectionalLight(0xffffff, 0.12);
+    const fill = new THREE.DirectionalLight(new THREE.Color(brightestHillColor), 0.24);
     fill.position.set(900, 1200, -600);
     scene.add(fill);
 
