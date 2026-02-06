@@ -1727,7 +1727,7 @@
     document.addEventListener('mousemove', (e) => {
       if (!isLocked) return;
       yaw -= e.movementX * MOUSE_SENS;
-      pitch -= e.movementY * MOUSE_SENS;
+      pitch += e.movementY * MOUSE_SENS;
       pitch = THREE.MathUtils.clamp(pitch, PITCH_MIN, PITCH_MAX);
     });
 
@@ -2970,6 +2970,8 @@ const h = new Float32Array(mapW * mapH);
     }
 
     // Player-ish sized black prism stand-in
+    const MEZZA_FALLBACK_SCALE = 0.03;
+
     function makeFallbackMezzaPrism() {
       const bodyH = (PLAYER_CAPSULE_H + (PLAYER_RADIUS * 2.0));
       const bodyW = (PLAYER_RADIUS * 2.0) * 1.05;
@@ -2991,6 +2993,7 @@ const h = new Float32Array(mapW * mapH);
 
       const g = new THREE.Group();
       g.add(mesh);
+      g.scale.setScalar(MEZZA_FALLBACK_SCALE);
       return g;
     }
 
