@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Oxanium:wght@300;400&display=swap" rel="stylesheet">
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MegaFuture — World Sandbox</title>
@@ -140,6 +140,12 @@
       animation: none !important;
       transform: none !important;
       will-change: auto;
+    }
+
+    #mfModal #mfTitleCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
 
     @keyframes microDrift {
@@ -1103,14 +1109,8 @@
       <div class="space">
         <div class="logoWrap">
           <div class="stack">
-            <img class="layer" src="images/megafuture_logo_4.PNG" alt="">
-            <img class="layer" src="images/megafuture_logo_3.PNG" alt="">
-            <img class="layer" src="images/megafuture_logo_2.PNG" alt="">
-            <img class="layer noDrift" src="images/megafuture_logo_1.PNG" alt="">
+            <canvas id="mfTitleCanvas" class="layer noDrift" aria-label="SuperFuture"></canvas>
           </div>
-
-          <div class="carousel ring1" id="ringMega"></div>
-          <div class="carousel ring2" id="ring232"></div>
 
           <div id="loader">loading.</div>
         </div>
@@ -1142,103 +1142,90 @@
         img.style.animationDelay = delay + "s";
       });
 
-      function buildGlyphRing(el, text, radius, opts = {}) {
-        const { letterSpacingPx = 6, fontSizePx = 18 } = opts;
-        el.innerHTML = "";
+      // SuperFuture title text (Oxanium + breathing glow)
+      const titleCanvas = document.getElementById("mfTitleCanvas");
+      if (titleCanvas) {
+        const ctx = titleCanvas.getContext("2d");
+        const W = 2048;
+        const H = 512;
+        titleCanvas.width = W;
+        titleCanvas.height = H;
 
-        const glyphs = [];
-        for (const ch of text) {
-          const d = document.createElement("div");
-          d.className = "item";
-          d.style.fontSize = fontSizePx + "px";
-          d.textContent = ch;
-          d.setAttribute("data-ch", ch);
-          el.appendChild(d);
-          glyphs.push(d);
+        const text = "SUPERFUTURE";
+        const fontFamily = "Oxanium";
+        const fontWeight = 400;
+        const scaleX = 1.0;
+        const scaleY = 0.5;
+        const tracking = 22;
+        const fontSize = 190;
+
+        function drawTrackedText(mode = "fill") {
+          const chars = text.split("");
+          let total = 0;
+          for (const ch of chars) total += ctx.measureText(ch).width;
+          total += tracking * (chars.length - 1);
+          let x = -total * 0.5;
+          for (let i = 0; i < chars.length; i++) {
+            const ch = chars[i];
+            if (mode === "stroke") ctx.strokeText(ch, x, 0);
+            else ctx.fillText(ch, x, 0);
+            x += ctx.measureText(ch).width + tracking;
+          }
         }
 
-        const widths = glyphs.map(g => g.getBoundingClientRect().width);
-        const totalPx = widths.reduce((a, b) => a + b, 0) + letterSpacingPx * (glyphs.length - 1);
+        function drawTitle(t) {
+          const time = t * 0.001;
+          const pulse = 0.5 + 0.5 * Math.sin(time * 0.8);
+          const blueStrength = Math.abs(pulse * 2.0 - 1.0);
 
-        let s = -totalPx / 2;
-        for (let i = 0; i < glyphs.length; i++) {
-          const w = widths[i];
-          const centerS = s + w / 2;
-          glyphs[i].dataset.theta0 = centerS / radius;
-          s += w + letterSpacingPx;
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, W, H);
+
+          ctx.save();
+          ctx.translate(W * 0.5, H * 0.5);
+          ctx.scale(scaleX, scaleY);
+          ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}, sans-serif`;
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+
+          // Halo outline
+          ctx.save();
+          ctx.fillStyle = `rgba(58, 215, 255, ${0.18 + 0.7 * blueStrength})`;
+          ctx.shadowColor = "rgba(58, 215, 255, 0.95)";
+          ctx.shadowBlur = 55 + 80 * blueStrength;
+          ctx.lineWidth = 16;
+          ctx.strokeStyle = `rgba(58, 215, 255, ${0.65 + 0.25 * blueStrength})`;
+          drawTrackedText("stroke");
+          ctx.restore();
+
+          // Glyph fill (milky white)
+          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+          drawTrackedText("fill");
+
+          // Inner highlight
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.08 + 0.18 * blueStrength})`;
+          ctx.shadowColor = "rgba(255, 255, 255, 0.6)";
+          ctx.shadowBlur = 10 + 20 * blueStrength;
+          ctx.lineWidth = 6;
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 + 0.35 * blueStrength})`;
+          drawTrackedText("stroke");
+
+          ctx.restore();
+
+          requestAnimationFrame(drawTitle);
         }
 
-        el.radius = radius;
-      }
-
-      function updateGlyphRing(el, angleDeg) {
-        const r = el.radius;
-        const aRad = angleDeg * Math.PI / 180;
-
-        el.querySelectorAll(".item").forEach(g => {
-          const theta0 = parseFloat(g.dataset.theta0) || 0;
-          const theta = theta0 + aRad;
-
-          const z = Math.cos(theta) * r;
-          const x = Math.sin(theta) * r;
-
-          const scale = (z + r) / (r * 2) + 0.5;
-          const opacity = Math.max(0.35, scale);
-
-          g.style.transform =
-            `translate(-50%, -50%)
-         translateX(${x}px)
-         translateZ(${z}px)
-         rotateY(${-theta * 180 / Math.PI}deg)
-         scale(${scale})`;
-
-          g.style.opacity = opacity;
-        });
-      }
-
-      /* motion (UNCHANGED) */
-      const FPS = 60;
-      const moveFrames = 110;
-      const pauseFrames = Math.round(2 * FPS);
-      const cycleFrames = moveFrames + pauseFrames;
-
-      function angleForFrame(f) {
-        const m = f % cycleFrames;
-        return m < moveFrames ? (m / moveFrames) * 360 : 360;
-      }
-
-      const ringMega = document.getElementById("ringMega");
-      const ring232 = document.getElementById("ring232");
-
-      buildGlyphRing(ringMega, "MEGAFUTURE", 125, { letterSpacingPx: 9, fontSizePx: 18 });
-      buildGlyphRing(ring232, "232", 110, { letterSpacingPx: 10, fontSizePx: 18 });
-
-      const START_DELAY_MS = 2000;
-      const startTime = performance.now();
-      let frame = 0;
-      let rafId = 0;
-
-      function tick() {
-        const elapsed = performance.now() - startTime;
-
-        if (elapsed < START_DELAY_MS) {
-          updateGlyphRing(ringMega, 0);
-          updateGlyphRing(ring232, 0);
-          rafId = requestAnimationFrame(tick);
-          return;
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(() => requestAnimationFrame(drawTitle));
+        } else {
+          requestAnimationFrame(drawTitle);
         }
-
-        frame++;
-        const a = angleForFrame(frame);
-        updateGlyphRing(ringMega, -a);
-        updateGlyphRing(ring232, +a);
-        rafId = requestAnimationFrame(tick);
       }
-      tick();
 
       /* loading cycler */
       const loaderEl = document.getElementById("loader");
       let dots = 1;
+      let rafId = 0;
       const loaderInterval = loaderEl ? setInterval(() => {
         dots = (dots % 3) + 1;
         loaderEl.textContent = "loading" + ".".repeat(dots);
@@ -1313,8 +1300,6 @@
         };
 
         const onKeyDown = (e) => {
-          if (e.code === 'Tab') return;
-          if (e.code === 'Escape') return;
           start(e);
         };
 
@@ -1727,6 +1712,7 @@
     document.addEventListener('mousemove', (e) => {
       if (!isLocked) return;
       yaw -= e.movementX * MOUSE_SENS;
+      // mouse up => look up, mouse down => look down
       pitch += e.movementY * MOUSE_SENS;
       pitch = THREE.MathUtils.clamp(pitch, PITCH_MIN, PITCH_MAX);
     });
