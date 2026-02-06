@@ -1265,6 +1265,8 @@
           window.removeEventListener('contextmenu', blockCtxMenu, true);
         };
 
+        const ENABLE_CUTSCENE = false;
+
         const start = (e) => {
           if (started) return;
           started = true;
@@ -1283,9 +1285,22 @@
             music.play().catch(() => { });
           }
 
-          // Run opening cutscene, then enter game
-          window.MF_Cutscene.play({
-            onStartGame: async () => {
+          if (ENABLE_CUTSCENE) {
+            // Run opening cutscene, then enter game
+            window.MF_Cutscene.play({
+              onStartGame: async () => {
+                await ensureFootstepsReady();
+
+                if (window.__mfEnablePointerLock) window.__mfEnablePointerLock();
+                const c = document.getElementById('c');
+                if (c && !document.pointerLockElement) c.requestPointerLock();
+
+                if (window.__mfClearKeys) window.__mfClearKeys();
+              }
+            });
+          } else {
+            // Skip opening cutscene; enter game immediately
+            (async () => {
               await ensureFootstepsReady();
 
               if (window.__mfEnablePointerLock) window.__mfEnablePointerLock();
@@ -1293,8 +1308,8 @@
               if (c && !document.pointerLockElement) c.requestPointerLock();
 
               if (window.__mfClearKeys) window.__mfClearKeys();
-            }
-          });
+            })();
+          }
         };
 
         const onKeyDown = (e) => {
