@@ -2556,14 +2556,6 @@ const h = new Float32Array(mapW * mapH);
         m.compose(t, q, s);
         treeTrunks.setMatrixAt(i, m);
 
-        colliders.push({
-          type: 'cap',
-          tag: 'trunk',
-          a: new THREE.Vector3(wx, base + trunkR, wz),
-          b: new THREE.Vector3(wx, base + trunkH - trunkR, wz),
-          r: trunkR * 1.05
-        });
-
         for (let k = 0; k < BRANCHES_PER_TREE; k++) {
           const yT = THREE.MathUtils.lerp(BRANCH_MIN_Y, BRANCH_MAX_Y, Math.random());
           const by = base + trunkH * yT;
@@ -2586,10 +2578,6 @@ const h = new Float32Array(mapW * mapH);
           m.compose(t, q, s);
           treeBranches.setMatrixAt(bIdx++, m);
 
-          const A = new THREE.Vector3(0, -0.5, 0).applyMatrix4(m);
-          const B = new THREE.Vector3(0, 0.5, 0).applyMatrix4(m);
-          const br = (Math.max(BRANCH_R0_BASE, BRANCH_R1_BASE) * thickness) * 1.05;
-          colliders.push({ type: 'cap', tag: 'branch', a: A, b: B, r: br });
         }
       }
 
