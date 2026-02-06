@@ -1348,9 +1348,9 @@
        FILES
     ========================= */
     const MAP_URL = './images/map.png';
-    const MEZZA_WALK_GLB = './assets/mezza_walking.glb';
-    const MEZZA_RUN_GLB = './assets/mezza_running.glb';
-    const MEZZA_IDLE_GLB = './assets/mezza_idle.glb';
+    const HERO_WALK_GLB = './assets/mezza_walking.glb';
+    const HERO_RUN_GLB = './assets/mezza_running.glb';
+    const HERO_IDLE_GLB = './assets/mezza_idle.glb';
 
     /* =========================
        AUDIO (walking footsteps only)
@@ -1452,7 +1452,7 @@
     const BASE_MAX_HEIGHT = 140.0;
     const HEIGHT_CURVE_POW = 0.85;
 
-    const PLAYER_SCALE = 25.0; // was 2.0 — Mezza is 10x smaller
+    const PLAYER_SCALE = 25.0; // was 2.0 — hero is 10x smaller
     const BASE_EYE_HEIGHT = 1.7;
     const PLAYER_EYE_HEIGHT = BASE_EYE_HEIGHT * PLAYER_SCALE;
 
@@ -1832,7 +1832,7 @@
 
       if (cmd === 'superflea') {
         // Ensure avatar exists even if ./assets/ is missing
-        ensureMezzaReady();
+        ensureHeroReady();
         VIEW_MODE = (VIEW_MODE === 'third') ? 'first' : 'third';
       }
     }
@@ -2944,9 +2944,9 @@ const h = new Float32Array(mapW * mapH);
     }
 
     // Player-ish sized black prism stand-in
-    const MEZZA_FALLBACK_SCALE = 0.03;
+    const HERO_FALLBACK_SCALE = 0.03;
 
-    function makeFallbackMezzaPrism() {
+    function makeFallbackHeroPrism() {
       const bodyH = (PLAYER_CAPSULE_H + (PLAYER_RADIUS * 2.0));
       const bodyW = (PLAYER_RADIUS * 2.0) * 1.05;
       const bodyD = (PLAYER_RADIUS * 2.0) * 0.85;
@@ -2967,149 +2967,149 @@ const h = new Float32Array(mapW * mapH);
 
       const g = new THREE.Group();
       g.add(mesh);
-      g.scale.setScalar(MEZZA_FALLBACK_SCALE);
+      g.scale.setScalar(HERO_FALLBACK_SCALE);
       return g;
     }
 
-    let mezzaFallbackBuilt = false;
-    function ensureMezzaReady() {
-      if (mezzaWalk || mezzaRun || mezzaIdle || mezzaFallbackBuilt) return;
+    let heroFallbackBuilt = false;
+    function ensureHeroReady() {
+      if (heroWalk || heroRun || heroIdle || heroFallbackBuilt) return;
 
-      mezzaIdle = makeFallbackMezzaPrism();
-      mezzaWalk = makeFallbackMezzaPrism();
-      mezzaRun = makeFallbackMezzaPrism();
+      heroIdle = makeFallbackHeroPrism();
+      heroWalk = makeFallbackHeroPrism();
+      heroRun = makeFallbackHeroPrism();
 
       // Default state: idle
-      mezzaIdle.visible = true;
-      mezzaWalk.visible = false;
-      mezzaRun.visible = false;
+      heroIdle.visible = true;
+      heroWalk.visible = false;
+      heroRun.visible = false;
 
-      mezzaRoot.add(mezzaIdle);
-      mezzaRoot.add(mezzaWalk);
-      mezzaRoot.add(mezzaRun);
+      heroRoot.add(heroIdle);
+      heroRoot.add(heroWalk);
+      heroRoot.add(heroRun);
 
-      mezzaIdleMixer = null;
-      mezzaWalkMixer = null;
-      mezzaRunMixer = null;
-      mezzaIdleAction = null;
-      mezzaWalkAction = null;
-      mezzaRunAction = null;
+      heroIdleMixer = null;
+      heroWalkMixer = null;
+      heroRunMixer = null;
+      heroIdleAction = null;
+      heroWalkAction = null;
+      heroRunAction = null;
 
-      mezzaFallbackBuilt = true;
+      heroFallbackBuilt = true;
     }
 
     /* =========================
-       MEZZA (3rd PERSON CHARACTER)
+       HERO (3rd PERSON CHARACTER)
     ========================= */
-    const mezzaRoot = new THREE.Group();
-    scene.add(mezzaRoot);
+    const heroRoot = new THREE.Group();
+    scene.add(heroRoot);
 
-    let mezzaWalk = null;
-    let mezzaRun = null;
-    let mezzaIdle = null;
-    let mezzaWalkMixer = null;
-    let mezzaRunMixer = null;
-    let mezzaIdleMixer = null;
-    let mezzaWalkAction = null;
-    let mezzaRunAction = null;
-    let mezzaIdleAction = null;
+    let heroWalk = null;
+    let heroRun = null;
+    let heroIdle = null;
+    let heroWalkMixer = null;
+    let heroRunMixer = null;
+    let heroIdleMixer = null;
+    let heroWalkAction = null;
+    let heroRunAction = null;
+    let heroIdleAction = null;
 
     const loader = new GLTFLoader();
 
-    async function loadMezza() {
+    async function loadHero() {
       // Idle (when not moving)
-      const gltfIdle = await safeLoad('Mezza idle GLB', MEZZA_IDLE_GLB, (u) => loader.loadAsync(u));
+      const gltfIdle = await safeLoad('hero idle GLB', HERO_IDLE_GLB, (u) => loader.loadAsync(u));
       if (gltfIdle && gltfIdle.scene) {
-        mezzaIdle = gltfIdle.scene;
-        mezzaIdle.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        heroIdle = gltfIdle.scene;
+        heroIdle.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
         // Default state is idle
-        mezzaIdle.visible = true;
-        mezzaRoot.add(mezzaIdle);
+        heroIdle.visible = true;
+        heroRoot.add(heroIdle);
 
-        mezzaIdleMixer = new THREE.AnimationMixer(mezzaIdle);
+        heroIdleMixer = new THREE.AnimationMixer(heroIdle);
         if (gltfIdle.animations && gltfIdle.animations.length) {
-          mezzaIdleAction = mezzaIdleMixer.clipAction(gltfIdle.animations[0]);
-          mezzaIdleAction.play();
+          heroIdleAction = heroIdleMixer.clipAction(gltfIdle.animations[0]);
+          heroIdleAction.play();
         }
       } else {
-        // If idle GLB fails, we'll fall back to walk-as-idle via setMezzaMode()
-        mezzaIdle = null;
-        mezzaIdleMixer = null;
-        mezzaIdleAction = null;
+        // If idle GLB fails, we'll fall back to walk-as-idle via setHeroMode()
+        heroIdle = null;
+        heroIdleMixer = null;
+        heroIdleAction = null;
       }
 
       // Walking
-      const gltfWalk = await safeLoad('Mezza walk GLB', MEZZA_WALK_GLB, (u) => loader.loadAsync(u));
+      const gltfWalk = await safeLoad('hero walk GLB', HERO_WALK_GLB, (u) => loader.loadAsync(u));
       if (gltfWalk && gltfWalk.scene) {
-        mezzaWalk = gltfWalk.scene;
-        mezzaWalk.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        heroWalk = gltfWalk.scene;
+        heroWalk.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
         // Start hidden until we actually move (or until idle is missing)
-        mezzaWalk.visible = !mezzaIdle;
-        mezzaRoot.add(mezzaWalk);
+        heroWalk.visible = !heroIdle;
+        heroRoot.add(heroWalk);
 
-        mezzaWalkMixer = new THREE.AnimationMixer(mezzaWalk);
+        heroWalkMixer = new THREE.AnimationMixer(heroWalk);
         if (gltfWalk.animations && gltfWalk.animations.length) {
-          mezzaWalkAction = mezzaWalkMixer.clipAction(gltfWalk.animations[0]);
-          mezzaWalkAction.play();
+          heroWalkAction = heroWalkMixer.clipAction(gltfWalk.animations[0]);
+          heroWalkAction.play();
         }
       } else {
-        mezzaWalk = makeFallbackMezzaPrism();
+        heroWalk = makeFallbackHeroPrism();
         // If idle exists, keep walk hidden by default
-        mezzaWalk.visible = !mezzaIdle;
-        mezzaRoot.add(mezzaWalk);
-        mezzaWalkMixer = null;
-        mezzaWalkAction = null;
+        heroWalk.visible = !heroIdle;
+        heroRoot.add(heroWalk);
+        heroWalkMixer = null;
+        heroWalkAction = null;
       }
 
       // Running
-      const gltfRun = await safeLoad('Mezza run GLB', MEZZA_RUN_GLB, (u) => loader.loadAsync(u));
+      const gltfRun = await safeLoad('hero run GLB', HERO_RUN_GLB, (u) => loader.loadAsync(u));
       if (gltfRun && gltfRun.scene) {
-        mezzaRun = gltfRun.scene;
-        mezzaRun.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
-        mezzaRun.visible = false;
-        mezzaRoot.add(mezzaRun);
+        heroRun = gltfRun.scene;
+        heroRun.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        heroRun.visible = false;
+        heroRoot.add(heroRun);
 
-        mezzaRunMixer = new THREE.AnimationMixer(mezzaRun);
+        heroRunMixer = new THREE.AnimationMixer(heroRun);
         if (gltfRun.animations && gltfRun.animations.length) {
-          mezzaRunAction = mezzaRunMixer.clipAction(gltfRun.animations[0]);
-          mezzaRunAction.play();
+          heroRunAction = heroRunMixer.clipAction(gltfRun.animations[0]);
+          heroRunAction.play();
         }
       } else {
-        mezzaRun = makeFallbackMezzaPrism();
-        mezzaRun.visible = false;
-        mezzaRoot.add(mezzaRun);
-        mezzaRunMixer = null;
-        mezzaRunAction = null;
+        heroRun = makeFallbackHeroPrism();
+        heroRun.visible = false;
+        heroRoot.add(heroRun);
+        heroRunMixer = null;
+        heroRunAction = null;
       }
     }
 
-    function setMezzaMode(isRunning, moving) {
-      ensureMezzaReady();
-      if (!mezzaWalk || !mezzaRun) return;
+    function setHeroMode(isRunning, moving) {
+      ensureHeroReady();
+      if (!heroWalk || !heroRun) return;
 
       // If we don't have a dedicated idle model, use walk as idle for now.
-      const hasIdle = !!mezzaIdle;
+      const hasIdle = !!heroIdle;
 
       if (!moving) {
         if (hasIdle) {
-          mezzaIdle.visible = true;
-          mezzaWalk.visible = false;
-          mezzaRun.visible = false;
+          heroIdle.visible = true;
+          heroWalk.visible = false;
+          heroRun.visible = false;
         } else {
-          mezzaWalk.visible = true;
-          mezzaRun.visible = false;
+          heroWalk.visible = true;
+          heroRun.visible = false;
         }
         return;
       }
 
       // Moving
-      if (hasIdle) mezzaIdle.visible = false;
-      mezzaWalk.visible = !isRunning;
-      mezzaRun.visible = isRunning;
+      if (hasIdle) heroIdle.visible = false;
+      heroWalk.visible = !isRunning;
+      heroRun.visible = isRunning;
     }
 
-    function setMezzaVisible(vis) {
-      mezzaRoot.visible = vis;
+    function setHeroVisible(vis) {
+      heroRoot.visible = vis;
     }
 
     /* =========================
@@ -3356,7 +3356,7 @@ const h = new Float32Array(mapW * mapH);
       })();
 
       await loadLevel();
-      await loadMezza();
+      await loadHero();
 
       // IMPORTANT: don’t say “ready” until the cutscene assets are hot too
       if (prewarmPromise) await prewarmPromise;
@@ -3593,16 +3593,16 @@ const h = new Float32Array(mapW * mapH);
     }
 
     /* =========================
-       CAMERA + MEZZA SYNC
+       CAMERA + HERO SYNC
     ========================= */
     const camPos = new THREE.Vector3();
     const camTarget = new THREE.Vector3();
     const desiredCam = new THREE.Vector3();
     const tmpRayDir = new THREE.Vector3();
 
-    function updateMezzaAndCamera(dt) {
+    function updateHeroAndCamera(dt) {
       // Always guarantee avatar exists (even if assets fail, or toggled later)
-      ensureMezzaReady();
+      ensureHeroReady();
 
       applyCameraRotation();
 
@@ -3610,29 +3610,29 @@ const h = new Float32Array(mapW * mapH);
       const moving = (keys.has('KeyW') || keys.has('KeyA') || keys.has('KeyS') || keys.has('KeyD'));
 
       // Switch models: walking GLB for idle+walk, running GLB for sprint+move
-      setMezzaMode(sprint && moving, moving);
+      setHeroMode(sprint && moving, moving);
 
-      // Mezza follows the capsule feet so jump is visible (not locked to terrain height)
+      // hero follows the capsule feet so jump is visible (not locked to terrain height)
       const footY = playerPos.y - PLAYER_EYE_HEIGHT;
-      mezzaRoot.position.set(playerPos.x, footY, playerPos.z);
+      heroRoot.position.set(playerPos.x, footY, playerPos.z);
 
-      // Rotate Mezza to face movement direction when moving,
+      // Rotate hero to face movement direction when moving,
       // otherwise face camera yaw (so you can pose/aim).
       if (moving) {
         // direction from wish vector (already normalized)
         const ang = Math.atan2(wish.x, wish.z);
-        mezzaRoot.rotation.set(0, ang, 0);
+        heroRoot.rotation.set(0, ang, 0);
       } else {
-        mezzaRoot.rotation.set(0, yaw, 0);
+        heroRoot.rotation.set(0, yaw, 0);
       }
 
-      // Mezza visibility: hide in first-person so she doesn't block view
-      setMezzaVisible(VIEW_MODE === 'third');
+      // hero visibility: hide in first-person so she doesn't block view
+      setHeroVisible(VIEW_MODE === 'third');
 
       // Update mixers (safe even when null)
-      if (mezzaIdleMixer && mezzaIdle && mezzaIdle.visible) mezzaIdleMixer.update(dt);
-      if (mezzaWalkMixer && mezzaWalk && mezzaWalk.visible) mezzaWalkMixer.update(dt);
-      if (mezzaRunMixer && mezzaRun && mezzaRun.visible) mezzaRunMixer.update(dt);
+      if (heroIdleMixer && heroIdle && heroIdle.visible) heroIdleMixer.update(dt);
+      if (heroWalkMixer && heroWalk && heroWalk.visible) heroWalkMixer.update(dt);
+      if (heroRunMixer && heroRun && heroRun.visible) heroRunMixer.update(dt);
 
       if (VIEW_MODE === 'first') {
         // First-person camera at player eye
@@ -3679,7 +3679,7 @@ const h = new Float32Array(mapW * mapH);
         }
       }
 
-      updateMezzaAndCamera(dt);
+      updateHeroAndCamera(dt);
 
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
@@ -3689,7 +3689,7 @@ const h = new Float32Array(mapW * mapH);
     window.__mfResetWorld = async () => {
       // If you want a “true reload”, you’re already doing the expensive rebuild here:
       await loadLevel();
-      await loadMezza();
+      await loadHero();
 
       // If your world has any other runtime state to reset, do it here
       vel.set(0, 0, 0);
