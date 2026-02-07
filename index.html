@@ -1460,6 +1460,9 @@
     const SPRINT_SPEED_MODIFIER = 5;
     const SPEED_SPRINT = 16.0 * SPRINT_SPEED_MODIFIER;
 
+    /* Sun arc */
+    const SUN_ARC_DURATION_S = 30.0; // 2 minutes
+
     /* Air control */
     const AIR_MAX_SPEED_WALK = SPEED_WALK;
     const AIR_MAX_SPEED_SPRINT = SPEED_SPRINT;
@@ -1825,6 +1828,12 @@
     const fill = new THREE.DirectionalLight(new THREE.Color(brightestHillColor), 0.24);
     fill.position.set(900, 1200, -600);
     scene.add(fill);
+
+    // Sun arc: east (x+) to west (x-) over SUN_ARC_DURATION_S
+    const SUN_ARC_RADIUS = 2200.0;
+    const SUN_ARC_HEIGHT = 700.0;
+    const SUN_ARC_Z = 200.0;
+    let sunArcT = 0.0;
 
     /* Level root */
     const levelRoot = new THREE.Group();
@@ -3774,6 +3783,19 @@ const h = new Float32Array(mapW * mapH);
     const clock = new THREE.Clock();
     function animate() {
       const dt = Math.min(clock.getDelta(), 0.033);
+
+      // Animate sun from east to west in a 2-minute loop
+      sunArcT = (sunArcT + dt) % SUN_ARC_DURATION_S;
+      const sunPhase = sunArcT / SUN_ARC_DURATION_S;
+      const sunAng = sunPhase * Math.PI;
+      sun.position.set(
+        Math.cos(sunAng) * SUN_ARC_RADIUS,
+        Math.sin(sunAng) * SUN_ARC_HEIGHT,
+        SUN_ARC_Z
+      );
+      sun.target.position.set(0, 0, 0);
+      sun.target.updateWorldMatrix(true, false);
+      updateHorizonSunPosition(14000);
 
       if (deathActive) {
         deathLockoutT = Math.max(0, deathLockoutT - dt);
