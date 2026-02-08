@@ -1212,13 +1212,13 @@
 
           ctx.restore();
 
-          requestAnimationFrame(drawTitle);
+          rafId = requestAnimationFrame(drawTitle);
         }
 
         if (document.fonts && document.fonts.ready) {
-          document.fonts.ready.then(() => requestAnimationFrame(drawTitle));
+          document.fonts.ready.then(() => { rafId = requestAnimationFrame(drawTitle); });
         } else {
-          requestAnimationFrame(drawTitle);
+          rafId = requestAnimationFrame(drawTitle);
         }
       }
 
@@ -1771,7 +1771,8 @@
     ========================= */
     const canvas = document.getElementById('c');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+    const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
+    renderer.setPixelRatio(IS_FIREFOX ? 1 : Math.min(devicePixelRatio, 1.5));
     renderer.setSize(innerWidth, innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -3860,7 +3861,7 @@ const h = new Float32Array(mapW * mapH);
     ========================= */
     const clock = new THREE.Clock();
     function animate() {
-      const dt = Math.min(clock.getDelta(), 0.033);
+      const dt = Math.min(clock.getDelta(), 0.10);
 
       // Animate sun from east to west in a 2-minute loop
       sunArcT = (sunArcT + dt) % SUN_ARC_DURATION_S;
