@@ -1461,7 +1461,9 @@
     const SPEED_SPRINT = 16.0 * SPRINT_SPEED_MODIFIER;
 
     /* Sun arc */
-    const SUN_ARC_DURATION_S = 30.0; // 2 minutes
+    let SUN_ARC_DURATION_S = 2000.0; // realistic default (full 360)
+    const SUN_ARC_DURATION_FAST_S = 60.0;
+    const SUN_ARC_DURATION_REAL_S = 2000.0;
 
     /* Air control */
     const AIR_MAX_SPEED_WALK = SPEED_WALK;
@@ -1680,6 +1682,8 @@
 
     const HERO_TOON_RAMP = makeHeroToonRamp();
 
+    const heroSunUniforms = new Set();
+
     function makeHeroToonPhongMaterial(baseColor) {
       const mat = new THREE.MeshToonMaterial({
         color: new THREE.Color(baseColor),
@@ -1694,6 +1698,8 @@
         shader.uniforms.uMidSpecAmt = { value: 0.55 };
         shader.uniforms.uHiSpecAmt = { value: 1.25 };
         shader.uniforms.uSpecBands = { value: 3.0 };
+        shader.uniforms.uSunDir = { value: new THREE.Vector3(0.55, 0.35, 0.75) };
+        heroSunUniforms.add(shader.uniforms.uSunDir);
 
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <common>',
@@ -1705,6 +1711,7 @@
            uniform float uMidSpecAmt;
            uniform float uHiSpecAmt;
            uniform float uSpecBands;
+           uniform vec3 uSunDir;
           `
         );
 
@@ -1721,7 +1728,7 @@
 
           vec3 N = normalize( normal );
           vec3 V = normalize( -vViewPosition );
-          vec3 L = normalize(vec3(0.55, 0.35, 0.75));
+          vec3 L = normalize(uSunDir);
           vec3 H = normalize(L + V);
           float ndh = max(dot(N, H), 0.0);
 
@@ -1826,11 +1833,17 @@
     scene.add(sun);
     scene.add(sun.target);
 
+    const MOON_LIGHT_COLOR = 0xbfd6ff;
+    const SUN_LIGHT_INTENSITY = 3.1;
+    const MOON_LIGHT_INTENSITY = 0.28;
+
     const fill = new THREE.DirectionalLight(new THREE.Color(brightestHillColor), 0.24);
     fill.position.set(900, 1200, -600);
+    fill.target.position.set(0, 0, 0);
     scene.add(fill);
+    scene.add(fill.target);
 
-    // Sun arc: east (x+) to west (x-) over SUN_ARC_DURATION_S
+    // Sun arc: full 360° starting at east horizon (x+), progressing west
     const SUN_ARC_RADIUS = 2200.0;
     const SUN_ARC_HEIGHT = 700.0;
     const SUN_ARC_Z = 200.0;
@@ -1843,28 +1856,48 @@
     /* =========================
        SKY DOME
     ========================= */
+    let skyTex = null;
+    let skyCtx = null;
+    function paintSkyGradient(dayT) {
+      if (!skyCtx) return;
+      const grad = skyCtx.createLinearGradient(0, 0, 0, 256);
+      const t = THREE.MathUtils.clamp(dayT, 0, 1);
+      const lerpHex = (a, b, t) => {
+        const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+        const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+        const r = Math.round(ar + (br - ar) * t);
+        const g = Math.round(ag + (bg - ag) * t);
+        const bl = Math.round(ab + (bb - ab) * t);
+        return `rgb(${r}, ${g}, ${bl})`;
+      };
+
+      const NIGHT = [0x1a0f1c, 0x3a2141, 0x6c3e6d, 0x8a5a86, 0xb08aa6];
+      const DAY = [0x0b2a3a, 0x1f6fa1, 0x3ad7ff, 0x7fe9ff, 0xffffff];
+
+      grad.addColorStop(0.00, lerpHex(NIGHT[0], DAY[0], t));
+      grad.addColorStop(0.40, lerpHex(NIGHT[1], DAY[1], t));
+      grad.addColorStop(0.70, lerpHex(NIGHT[2], DAY[2], t));
+      grad.addColorStop(0.90, lerpHex(NIGHT[3], DAY[3], t));
+      grad.addColorStop(1.00, lerpHex(NIGHT[4], DAY[4], t));
+      skyCtx.fillStyle = grad;
+      skyCtx.fillRect(0, 0, 32, 256);
+      if (skyTex) skyTex.needsUpdate = true;
+    }
+
     function makeSkyDome() {
       const skyCanvas = document.createElement('canvas');
       skyCanvas.width = 32;
       skyCanvas.height = 256;
-      const ctx = skyCanvas.getContext('2d');
+      skyCtx = skyCanvas.getContext('2d');
 
-      const grad = ctx.createLinearGradient(0, 0, 0, 256);
-      grad.addColorStop(0.00, '#0b2a3a');
-      grad.addColorStop(0.40, '#1f6fa1');
-      grad.addColorStop(0.70, '#3ad7ff');
-      grad.addColorStop(0.90, '#7fe9ff');
-      grad.addColorStop(1.00, '#ffffff');
+      paintSkyGradient(1);
 
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 32, 256);
-
-      const tex = new THREE.CanvasTexture(skyCanvas);
-      tex.colorSpace = THREE.SRGBColorSpace;
+      skyTex = new THREE.CanvasTexture(skyCanvas);
+      skyTex.colorSpace = THREE.SRGBColorSpace;
 
       const geo = new THREE.SphereGeometry(SKY_RADIUS, 32, 16);
       const mat = new THREE.MeshBasicMaterial({
-        map: tex,
+        map: skyTex,
         side: THREE.BackSide,
         depthWrite: false,
         fog: false
@@ -2016,6 +2049,11 @@
         // Ensure avatar exists even if ./assets/ is missing
         ensureHeroReady();
         VIEW_MODE = (VIEW_MODE === 'third') ? 'first' : 'third';
+      }
+      if (cmd === 'gettingold') {
+        SUN_ARC_DURATION_S = (SUN_ARC_DURATION_S === SUN_ARC_DURATION_FAST_S)
+          ? SUN_ARC_DURATION_REAL_S
+          : SUN_ARC_DURATION_FAST_S;
       }
     }
 
@@ -3859,6 +3897,8 @@ const h = new Float32Array(mapW * mapH);
     /* =========================
        LOOP
     ========================= */
+    const sunDirWorld = new THREE.Vector3();
+    const sunDirView = new THREE.Vector3();
     const clock = new THREE.Clock();
     function animate() {
       const dt = Math.min(clock.getDelta(), 0.10);
@@ -3866,7 +3906,7 @@ const h = new Float32Array(mapW * mapH);
       // Animate sun from east to west in a 2-minute loop
       sunArcT = (sunArcT + dt) % SUN_ARC_DURATION_S;
       const sunPhase = sunArcT / SUN_ARC_DURATION_S;
-      const sunAng = sunPhase * Math.PI;
+      const sunAng = sunPhase * Math.PI * 2.0;
       sun.position.set(
         Math.cos(sunAng) * SUN_ARC_RADIUS,
         Math.sin(sunAng) * SUN_ARC_HEIGHT,
@@ -3875,6 +3915,27 @@ const h = new Float32Array(mapW * mapH);
       sun.target.position.set(0, 0, 0);
       sun.target.updateWorldMatrix(true, false);
       updateHorizonSunPosition(14000);
+
+      // Align all directional lighting to the sun axis
+      fill.position.copy(sun.position);
+      fill.target.position.set(0, 0, 0);
+      fill.target.updateWorldMatrix(true, false);
+
+      // Keep hero specular aligned with the actual sun direction
+      sunDirWorld.copy(sun.position).normalize();
+      sunDirView.copy(sunDirWorld).transformDirection(camera.matrixWorldInverse);
+      for (const u of heroSunUniforms) u.value.copy(sunDirView);
+
+      // Day/night lighting: sun below horizon -> moonlight + mauve sky
+      const nightStartY = -220.0;
+      const dayStartY = 180.0;
+      const dayT = THREE.MathUtils.clamp((sun.position.y - nightStartY) / (dayStartY - nightStartY), 0, 1);
+
+      sun.intensity = SUN_LIGHT_INTENSITY * dayT;
+      fill.color.setHex(MOON_LIGHT_COLOR).lerp(new THREE.Color(brightestHillColor), dayT);
+      fill.intensity = THREE.MathUtils.lerp(MOON_LIGHT_INTENSITY, 0.24, dayT);
+
+      paintSkyGradient(dayT);
 
       if (deathActive) {
         deathLockoutT = Math.max(0, deathLockoutT - dt);
