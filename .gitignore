@@ -1,6 +1,7 @@
 # Assets (kept private by default; allow GLB via Git LFS)
 assets/*
-!assets/*.glb
+!assets/FusionReactor.glb
+!assets/douglas_fir.py
 
 .DS_Store
 Thumbs.db
