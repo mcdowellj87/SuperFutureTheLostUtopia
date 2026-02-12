@@ -1690,6 +1690,7 @@
     const HERO_TOON_RAMP = makeHeroToonRamp();
 
     const heroSunUniforms = new Set();
+    const fusionSunUniforms = new Set();
 
     function makeHeroToonPhongMaterial(baseColor) {
       const mat = new THREE.MeshToonMaterial({
@@ -1751,6 +1752,95 @@
           spec *= smoothstep(0.05, 0.4, ndl);
 
           outColor += vec3(spec);
+
+          gl_FragColor = vec4( outColor, diffuseColor.a );
+
+          #ifdef TONE_MAPPING
+            gl_FragColor.rgb = toneMapping( gl_FragColor.rgb );
+          #endif
+          gl_FragColor = linearToOutputTexel( gl_FragColor );
+          `
+        );
+      };
+
+      return mat;
+    }
+
+    function makeFusionReactorMetalMaterial(sourceMat) {
+      const baseColor = sourceMat?.color?.isColor ? sourceMat.color.clone() : new THREE.Color(0x8a93a8);
+      const emissive = sourceMat?.emissive?.isColor ? sourceMat.emissive.clone() : new THREE.Color(0x000000);
+      const mat = new THREE.MeshToonMaterial({
+        color: baseColor,
+        map: sourceMat?.map || null,
+        emissive,
+        emissiveMap: sourceMat?.emissiveMap || null,
+        gradientMap: HERO_TOON_RAMP,
+        transparent: !!sourceMat?.transparent,
+        opacity: sourceMat?.opacity ?? 1.0,
+        side: sourceMat?.side ?? THREE.FrontSide,
+        alphaTest: sourceMat?.alphaTest ?? 0.0,
+        depthTest: sourceMat?.depthTest ?? true,
+        depthWrite: sourceMat?.depthWrite ?? true,
+        fog: true
+      });
+
+      mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uBaseBright = { value: 1.10 };
+        shader.uniforms.uMidSpecPow = { value: 22.0 };
+        shader.uniforms.uHiSpecPow = { value: 55.0 };
+        shader.uniforms.uMidSpecAmt = { value: 0.40 };
+        shader.uniforms.uHiSpecAmt = { value: 0.75 };
+        shader.uniforms.uSpecBands = { value: 3.0 };
+        shader.uniforms.uSpecEnergy = { value: 0.92 };
+        shader.uniforms.uSpecSoft = { value: 0.28 };
+        shader.uniforms.uSpecMax = { value: 0.90 };
+        shader.uniforms.uSpecTint = { value: new THREE.Color('#b7d5ff') };
+        shader.uniforms.uSunDir = { value: new THREE.Vector3(0.55, 0.35, 0.75) };
+        fusionSunUniforms.add(shader.uniforms.uSunDir);
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uBaseBright;
+           uniform float uMidSpecPow;
+           uniform float uHiSpecPow;
+           uniform float uMidSpecAmt;
+           uniform float uHiSpecAmt;
+           uniform float uSpecBands;
+           uniform float uSpecEnergy;
+           uniform float uSpecSoft;
+           uniform float uSpecMax;
+           uniform vec3  uSpecTint;
+           uniform vec3  uSunDir;
+          `
+        );
+
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <output_fragment>',
+          `
+          vec3 outColor = outgoingLight;
+          outColor *= uBaseBright;
+
+          vec3 N = normalize( normal );
+          vec3 V = normalize( -vViewPosition );
+          vec3 L = normalize(uSunDir);
+          vec3 H = normalize(L + V);
+          float ndh = max(dot(N, H), 0.0);
+
+          float midSpec = pow(ndh, uMidSpecPow) * uMidSpecAmt;
+          float hiSpec  = pow(ndh, uHiSpecPow)  * uHiSpecAmt;
+          float spec = clamp(midSpec + hiSpec, 0.0, 1.0);
+
+          float bands = max(uSpecBands, 1.0);
+          spec = floor(spec * bands) / bands;
+
+          float ndl = max(dot(N, L), 0.0);
+          spec *= smoothstep(0.08, 0.55, ndl);
+          spec = mix(spec, smoothstep(0.0, 1.0, spec), uSpecSoft);
+          spec *= uSpecEnergy;
+          spec = min(spec, uSpecMax);
+
+          outColor += (uSpecTint * spec);
 
           gl_FragColor = vec4( outColor, diffuseColor.a );
 
@@ -3341,6 +3431,9 @@ const h = new Float32Array(mapW * mapH);
         fusionReactor.scale.setScalar(10);
         fusionReactor.traverse(o => {
           if (!o.isMesh) return;
+          const mats = Array.isArray(o.material) ? o.material : [o.material];
+          const shaded = mats.map((m) => makeFusionReactorMetalMaterial(m));
+          o.material = Array.isArray(o.material) ? shaded : shaded[0];
           o.castShadow = false;
           o.receiveShadow = false;
         });
@@ -4011,6 +4104,7 @@ const h = new Float32Array(mapW * mapH);
       sunDirWorld.copy(sun.position).normalize();
       sunDirView.copy(sunDirWorld).transformDirection(camera.matrixWorldInverse);
       for (const u of heroSunUniforms) u.value.copy(sunDirView);
+      for (const u of fusionSunUniforms) u.value.copy(sunDirView);
 
       // Day/night lighting: sun below horizon -> moonlight + mauve sky
       const nightStartY = -220.0;
