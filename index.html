@@ -1576,10 +1576,9 @@
     ========================= */
     const COLORS = {
       TREE: rgb('#8b5a2b'),
-      HOUSE: rgb('#ff0000'),
       PLAYER: rgb('#0000ff'),
       BORDER: rgb('#ffff00'),
-      FUSION_REACTOR_SPAWN: rgb('#3AD7FF')
+      FUSION_REACTOR_SPAWN: rgb('#FF0000')
     };
 
     function rgb(hex) {
@@ -1598,8 +1597,7 @@
       return near([r, g, b], COLORS.BORDER) || (r >= 230 && g >= 230 && b <= 120);
     }
     function isSpecial(r, g, b) {
-      return near([r, g, b], COLORS.HOUSE) ||
-        near([r, g, b], COLORS.TREE) ||
+      return near([r, g, b], COLORS.TREE) ||
         near([r, g, b], COLORS.PLAYER) ||
         near([r, g, b], COLORS.FUSION_REACTOR_SPAWN);
     }
@@ -1608,8 +1606,7 @@
       return near([r, g, b], COLORS.TREE);
     }
     function isHousePixel(r, g, b, a) {
-      if (a < 16) return false;
-      return near([r, g, b], COLORS.HOUSE);
+      return false;
     }
     function isFusionReactorSpawnPixel(r, g, b, a) {
       if (a < 16) return false;
@@ -2849,6 +2846,7 @@ const h = new Float32Array(mapW * mapH);
 
     function buildBuildingPerimeterFromBitmap(data) {
       clearBuildings();
+      return;
 
       const mask = new Uint8Array(mapW * mapH);
       for (let y = 0; y < mapH; y++) {
@@ -3353,7 +3351,7 @@ const h = new Float32Array(mapW * mapH);
     function placeFusionReactorAtSpawn() {
       if (!fusionReactor) return;
       if (!fusionReactorSpawnPos) {
-        console.warn('[spawn] Fusion reactor marker #3AD7FF not found; reactor placement skipped');
+        console.warn('[spawn] Fusion reactor marker #FF0000 not found; reactor placement skipped');
         return;
       }
       const sourcePos = fusionReactorSpawnPos;
@@ -3633,7 +3631,7 @@ const h = new Float32Array(mapW * mapH);
       if (fusionReactorSpawnPos) {
         console.info('[spawn] Fusion reactor marker found at', fusionReactorSpawnPos.x.toFixed(2), fusionReactorSpawnPos.z.toFixed(2));
       } else {
-        console.warn('[spawn] No #3AD7FF fusion reactor marker found in map.png; reactor placement skipped');
+        console.warn('[spawn] No #FF0000 fusion reactor marker found in map.png; reactor placement skipped');
       }
 
       await loadFusionReactor();
