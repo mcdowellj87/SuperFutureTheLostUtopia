@@ -1352,6 +1352,7 @@
     const HERO_RUN_GLB = './assets/mezza_running.glb';
     const HERO_IDLE_GLB = './assets/mezza_idle.glb';
     const FUSION_REACTOR_GLB = './assets/FusionReactor.glb';
+    const FUSION_REACTOR_GLB_FALLBACK = 'https://media.githubusercontent.com/media/mcdowellj87/SuperFutureTheLostUtopia/main/assets/FusionReactor.glb';
 
     /* =========================
        AUDIO (walking footsteps only)
@@ -3333,7 +3334,10 @@ const h = new Float32Array(mapW * mapH);
 
     async function loadFusionReactor() {
       if (fusionReactor) return fusionReactor;
-      const gltf = await safeLoad('FusionReactor GLB', FUSION_REACTOR_GLB, (u) => loader.loadAsync(u));
+      let gltf = await safeLoad('FusionReactor GLB', FUSION_REACTOR_GLB, (u) => loader.loadAsync(u));
+      if (!gltf && location.hostname.endsWith('github.io')) {
+        gltf = await safeLoad('FusionReactor GLB (fallback)', FUSION_REACTOR_GLB_FALLBACK, (u) => loader.loadAsync(u));
+      }
       if (gltf && gltf.scene) {
         fusionReactor = gltf.scene;
         fusionReactor.scale.setScalar(10);
