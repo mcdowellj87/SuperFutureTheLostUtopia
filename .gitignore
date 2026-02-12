@@ -1,5 +1,6 @@
-# Assets (kept in private repo)
-assets/
+# Assets (kept private by default; allow GLB via Git LFS)
+assets/*
+!assets/*.glb
 
 .DS_Store
 Thumbs.db
