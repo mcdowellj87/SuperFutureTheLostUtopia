@@ -1351,6 +1351,7 @@
     const HERO_WALK_GLB = './assets/mezza_walking.glb';
     const HERO_RUN_GLB = './assets/mezza_running.glb';
     const HERO_IDLE_GLB = './assets/mezza_idle.glb';
+    const FUSION_REACTOR_GLB = './assets/FusionReactor.glb';
 
     /* =========================
        AUDIO (walking footsteps only)
@@ -1576,7 +1577,8 @@
       TREE: rgb('#8b5a2b'),
       HOUSE: rgb('#ff0000'),
       PLAYER: rgb('#0000ff'),
-      BORDER: rgb('#ffff00')
+      BORDER: rgb('#ffff00'),
+      FUSION_REACTOR_SPAWN: rgb('#3AD7FF')
     };
 
     function rgb(hex) {
@@ -1597,7 +1599,8 @@
     function isSpecial(r, g, b) {
       return near([r, g, b], COLORS.HOUSE) ||
         near([r, g, b], COLORS.TREE) ||
-        near([r, g, b], COLORS.PLAYER);
+        near([r, g, b], COLORS.PLAYER) ||
+        near([r, g, b], COLORS.FUSION_REACTOR_SPAWN);
     }
     function isTreePixel(r, g, b, a) {
       if (a < 16) return false;
@@ -1606,6 +1609,12 @@
     function isHousePixel(r, g, b, a) {
       if (a < 16) return false;
       return near([r, g, b], COLORS.HOUSE);
+    }
+    function isFusionReactorSpawnPixel(r, g, b, a) {
+      if (a < 16) return false;
+      return r === COLORS.FUSION_REACTOR_SPAWN[0] &&
+        g === COLORS.FUSION_REACTOR_SPAWN[1] &&
+        b === COLORS.FUSION_REACTOR_SPAWN[2];
     }
 
     /* =========================
@@ -2055,6 +2064,11 @@
           ? SUN_ARC_DURATION_REAL_S
           : SUN_ARC_DURATION_FAST_S;
       }
+      if (cmd === 'glassfloor') {
+        glassfloorEnabled = !glassfloorEnabled;
+        if (terrainMesh) terrainMesh.visible = !glassfloorEnabled;
+        console.info('[cheat] glassfloor', glassfloorEnabled ? 'enabled' : 'disabled');
+      }
     }
 
     /* Capture typing when console is open */
@@ -2378,6 +2392,7 @@ const h = new Float32Array(mapW * mapH);
        TERRAIN
     ========================= */
     let terrainMesh = null;
+    let glassfloorEnabled = false;
 
     function disposeMesh(m) {
       if (!m) return;
@@ -2417,6 +2432,7 @@ const h = new Float32Array(mapW * mapH);
 
       terrainMesh = new THREE.Mesh(geo, mat);
       terrainMesh.renderOrder = 1;
+      terrainMesh.visible = !glassfloorEnabled;
       levelRoot.add(terrainMesh);
     }
 
@@ -3221,6 +3237,7 @@ const h = new Float32Array(mapW * mapH);
     let heroWalk = null;
     let heroRun = null;
     let heroIdle = null;
+    let fusionReactor = null;
     let heroWalkMixer = null;
     let heroRunMixer = null;
     let heroIdleMixer = null;
@@ -3314,6 +3331,38 @@ const h = new Float32Array(mapW * mapH);
       }
     }
 
+    async function loadFusionReactor() {
+      if (fusionReactor) return fusionReactor;
+      const gltf = await safeLoad('FusionReactor GLB', FUSION_REACTOR_GLB, (u) => loader.loadAsync(u));
+      if (gltf && gltf.scene) {
+        fusionReactor = gltf.scene;
+        fusionReactor.scale.setScalar(10);
+        fusionReactor.traverse(o => {
+          if (!o.isMesh) return;
+          o.castShadow = false;
+          o.receiveShadow = false;
+        });
+      }
+      return fusionReactor;
+    }
+
+    function placeFusionReactorAtSpawn() {
+      if (!fusionReactor) return;
+      if (!fusionReactorSpawnPos) {
+        console.warn('[spawn] Fusion reactor marker #3AD7FF not found; reactor placement skipped');
+        return;
+      }
+      const sourcePos = fusionReactorSpawnPos;
+      const groundY = Math.max(heightAtWorld(sourcePos.x, sourcePos.z), SEA_LEVEL);
+      fusionReactor.position.set(sourcePos.x, 0, sourcePos.z);
+      fusionReactor.updateMatrixWorld(true);
+      const bbox = new THREE.Box3().setFromObject(fusionReactor);
+      const yOffset = groundY - bbox.min.y;
+      fusionReactor.position.y += yOffset;
+      fusionReactor.updateMatrixWorld(true);
+      if (fusionReactor.parent !== levelRoot) levelRoot.add(fusionReactor);
+    }
+
     function setHeroMode(isRunning, moving) {
       ensureHeroReady();
       if (!heroWalk || !heroRun) return;
@@ -3360,6 +3409,28 @@ const h = new Float32Array(mapW * mapH);
       return { x: 0, z: 0 };
     }
 
+    function findFusionReactorSpawn(data) {
+      let hitCount = 0;
+      let sumX = 0;
+      let sumY = 0;
+
+      for (let y = 0; y < mapH; y++) {
+        for (let x = 0; x < mapW; x++) {
+          const p = (y * mapW + x) * 4;
+          const r = data[p], g = data[p + 1], b = data[p + 2], a = data[p + 3];
+          if (!isFusionReactorSpawnPixel(r, g, b, a)) continue;
+          sumX += x;
+          sumY += y;
+          hitCount++;
+        }
+      }
+
+      if (!hitCount) return null;
+      const cx = sumX / hitCount;
+      const cy = sumY / hitCount;
+      return { x: cx * cell - halfW + cell * 0.5, z: cy * cell - halfH + cell * 0.5 };
+    }
+
     /* =========================
        PLAYER STATE
     ========================= */
@@ -3369,6 +3440,7 @@ const h = new Float32Array(mapW * mapH);
     const vel = new THREE.Vector3();
     const playerPos = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 6);
     const spawnPos = new THREE.Vector3();
+    let fusionReactorSpawnPos = null;
 
     /* =========================
        DEATH SYSTEM (DROWNING v1)
@@ -3528,6 +3600,10 @@ const h = new Float32Array(mapW * mapH);
       ctx.drawImage(bmp, 0, 0);
       const data = ctx.getImageData(0, 0, mapW, mapH).data;
 
+      // Read explicit map markers before height derivation mutates pixel channels.
+      const sp = findPlayerSpawn(data);
+      const frSpawn = findFusionReactorSpawn(data);
+
       const derived = deriveHeightsAndWater(data);
       heights = derived.heights;
       waterMask = derived.waterMask;
@@ -3545,11 +3621,19 @@ const h = new Float32Array(mapW * mapH);
 
       rebuildColliderGrid();
 
-      const sp = findPlayerSpawn(data);
       const py = Math.max(heightAtWorld(sp.x, sp.z), SEA_LEVEL) + PLAYER_EYE_HEIGHT;
       playerPos.set(sp.x, py, sp.z);
 
       spawnPos.copy(playerPos); // ✅ remember spawn for respawn
+      fusionReactorSpawnPos = frSpawn ? new THREE.Vector3(frSpawn.x, 0, frSpawn.z) : null;
+      if (fusionReactorSpawnPos) {
+        console.info('[spawn] Fusion reactor marker found at', fusionReactorSpawnPos.x.toFixed(2), fusionReactorSpawnPos.z.toFixed(2));
+      } else {
+        console.warn('[spawn] No #3AD7FF fusion reactor marker found in map.png; reactor placement skipped');
+      }
+
+      await loadFusionReactor();
+      placeFusionReactorAtSpawn();
 
       vel.set(0, 0, 0);
       grounded = false;
