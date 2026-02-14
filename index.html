@@ -1354,6 +1354,7 @@
     const HERO_IDLE_GLB = './assets/mezza_idle.glb';
     const FUSION_REACTOR_GLB = './assets/FusionReactor.glb';
     const FUSION_REACTOR_GLB_FALLBACK = 'https://media.githubusercontent.com/media/mcdowellj87/SuperFutureTheLostUtopia/main/assets/FusionReactor.glb';
+    const FIR_BRANCH_SPRIG_URL = './images/branch.png';
 
     /* =========================
        AUDIO (walking footsteps only)
@@ -2717,11 +2718,43 @@ const h = new Float32Array(mapW * mapH);
     const FIR_BRANCH_START = 0.35;
     const FIR_WHORLS = 18;
     const FIR_BRANCH_SEGMENTS = 6;
+    const FIR_HIDE_BRANCHES = false;
+    const FIR_BRANCH_LENGTH_SCALE = 2 / 3;
+    const FIR_TOP_SHORT_START = 0.93;
+    const FIR_TOP_SHORT_END_SCALE = 0.0875;
+    const FIR_TOP_UP_DEG = 40;
+    const FIR_TOP_UP_RAD = THREE.MathUtils.degToRad(FIR_TOP_UP_DEG);
+    const FIR_LOWER_BRANCH_FRACTION = 1 / 3;
+    const FIR_LOWER_BRANCH_DOWN_DEG = 40;
+    const FIR_LOWER_BRANCH_DOWN_RAD = THREE.MathUtils.degToRad(FIR_LOWER_BRANCH_DOWN_DEG);
+    const FIR_MID_BRANCH_FRACTION = 2 / 3;
+    const FIR_MID_BRANCH_DOWN_DEG = 25;
+    const FIR_MID_BRANCH_DOWN_RAD = THREE.MathUtils.degToRad(FIR_MID_BRANCH_DOWN_DEG);
+    const FIR_TOP_BRANCH_DOWN_DEG = 15;
+    const FIR_TOP_BRANCH_DOWN_RAD = THREE.MathUtils.degToRad(FIR_TOP_BRANCH_DOWN_DEG);
     const FIR_TEMPLATE_SCALE = 1.2;
+    const FIR_BRANCH_SPRIG_START_T = 0.03;
+    const FIR_BRANCH_SPRIG_STEP_T = 0.03;
+    const FIR_BRANCH_SPRIG_OVERLAP = 0.33;
+    const FIR_BRANCH_SPRIG_DENSITY_MULT = 1.0;
+    const FIR_BRANCH_SPRIG_FIRST_SCALE = 2.5;
+    const FIR_BRANCH_SPRIG_SCALE_STEP = 0.93;
+    const FIR_BRANCH_SPRIG_ROLL_STEP_DEG = 3.0;
+    const FIR_BRANCH_SPRIG_SPACING_JITTER = 0.18;
 
     let treeInstancesMesh = null;
     let treeTemplateGeometry = null;
     let treeTemplateMaterial = null;
+    let treeBranchSprigInstancesMesh = null;
+    let treeBranchSprigTemplateGeometry = null;
+    let treeBranchSprigTemplateMaterial = null;
+    let treeBranchSprigLocalMatrices = null;
+
+    function getBranchPoint(start, dir, gravity, length, sag, t) {
+      const point = start.clone().addScaledVector(dir, length * t);
+      point.addScaledVector(gravity, sag * length * t * (1 - t) * 1.4);
+      return point;
+    }
 
     function makeSeededRng(seed) {
       let t = seed >>> 0;
@@ -2731,6 +2764,48 @@ const h = new Float32Array(mapW * mapH);
         x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
         return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
       };
+    }
+
+    function setFirBranchDirection(out, angle, t) {
+      if (t >= FIR_TOP_SHORT_START) {
+        const horizontal = Math.cos(FIR_TOP_UP_RAD);
+        out.set(
+          Math.cos(angle) * horizontal,
+          Math.sin(FIR_TOP_UP_RAD),
+          Math.sin(angle) * horizontal
+        );
+      } else if (t < FIR_LOWER_BRANCH_FRACTION) {
+        const horizontal = Math.cos(FIR_LOWER_BRANCH_DOWN_RAD);
+        out.set(
+          Math.cos(angle) * horizontal,
+          -Math.sin(FIR_LOWER_BRANCH_DOWN_RAD),
+          Math.sin(angle) * horizontal
+        );
+      } else if (t < FIR_MID_BRANCH_FRACTION) {
+        const horizontal = Math.cos(FIR_MID_BRANCH_DOWN_RAD);
+        out.set(
+          Math.cos(angle) * horizontal,
+          -Math.sin(FIR_MID_BRANCH_DOWN_RAD),
+          Math.sin(angle) * horizontal
+        );
+      } else {
+        const horizontal = Math.cos(FIR_TOP_BRANCH_DOWN_RAD);
+        out.set(
+          Math.cos(angle) * horizontal,
+          -Math.sin(FIR_TOP_BRANCH_DOWN_RAD),
+          Math.sin(angle) * horizontal
+        );
+      }
+      return out.normalize();
+    }
+
+    function getFirBranchLengthAt(t) {
+      let length = 16.0 * (1 - t * 0.6) * FIR_BRANCH_LENGTH_SCALE;
+      if (t >= FIR_TOP_SHORT_START) {
+        const u = THREE.MathUtils.clamp((t - FIR_TOP_SHORT_START) / (1.0 - FIR_TOP_SHORT_START), 0, 1);
+        length *= THREE.MathUtils.lerp(1.0, FIR_TOP_SHORT_END_SCALE, u);
+      }
+      return length;
     }
 
     function buildDouglasFirTemplateGeometry() {
@@ -2766,8 +2841,7 @@ const h = new Float32Array(mapW * mapH);
         const t = i / FIR_WHORLS;
         const yBase = FIR_HEIGHT * (FIR_BRANCH_START + (1 - FIR_BRANCH_START) * t) - (FIR_HEIGHT * 0.5);
 
-        let length = 16.0 * (1 - t * 0.6);
-        if (t > 0.98) length *= (1 - (t - 0.98) * 40.0);
+        const length = getFirBranchLengthAt(t);
 
         const sag = 0.20 * Math.pow(1 - t, 0.9);
         const thickness = 0.12 * Math.pow(1 - t, 0.8);
@@ -2776,8 +2850,7 @@ const h = new Float32Array(mapW * mapH);
 
         for (let j = 0; j < count; j++) {
           const angle = phase + (j / count) * Math.PI * 2.0 + THREE.MathUtils.lerp(-0.1, 0.1, rng());
-          const verticalBias = (t < 0.4) ? -0.05 : (t < 0.8 ? 0.05 : 0.35);
-          dir.set(Math.cos(angle), verticalBias, Math.sin(angle)).normalize();
+          setFirBranchDirection(dir, angle, t);
 
           const trunkR = FIR_TRUNK_RADIUS_TOP + (FIR_TRUNK_RADIUS_BASE - FIR_TRUNK_RADIUS_TOP) * Math.pow(1 - t, 2.0);
           start.set(dir.x * trunkR * 1.05, yBase, dir.z * trunkR * 1.05);
@@ -2790,18 +2863,20 @@ const h = new Float32Array(mapW * mapH);
             points.push(p);
           }
 
-          for (let k = 0; k < FIR_BRANCH_SEGMENTS; k++) {
-            a.copy(points[k]);
-            b.copy(points[k + 1]);
-            const segLen = a.distanceTo(b);
-            if (segLen <= 1e-4) continue;
+          if (!FIR_HIDE_BRANCHES) {
+            for (let k = 0; k < FIR_BRANCH_SEGMENTS; k++) {
+              a.copy(points[k]);
+              b.copy(points[k + 1]);
+              const segLen = a.distanceTo(b);
+              if (segLen <= 1e-4) continue;
 
-            const seg = new THREE.CylinderGeometry(thickness, thickness, segLen, 5, 1, false);
-            mid.copy(a).add(b).multiplyScalar(0.5);
-            q.setFromUnitVectors(up, b.clone().sub(a).normalize());
-            seg.applyQuaternion(q);
-            seg.translate(mid.x, mid.y, mid.z);
-            parts.push(seg);
+              const seg = new THREE.CylinderGeometry(thickness, thickness, segLen, 5, 1, false);
+              mid.copy(a).add(b).multiplyScalar(0.5);
+              q.setFromUnitVectors(up, b.clone().sub(a).normalize());
+              seg.applyQuaternion(q);
+              seg.translate(mid.x, mid.y, mid.z);
+              parts.push(seg);
+            }
           }
         }
       }
@@ -2812,10 +2887,82 @@ const h = new Float32Array(mapW * mapH);
       return treeTemplateGeometry;
     }
 
+    function buildDouglasFirBranchSprigLocalMatrices() {
+      if (treeBranchSprigLocalMatrices) return treeBranchSprigLocalMatrices;
+
+      const rng = makeSeededRng(44);
+      const gravity = new THREE.Vector3(0, -1, 0);
+      const dir = new THREE.Vector3();
+      const start = new THREE.Vector3();
+      const radial = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+      const localMatrices = [];
+
+      for (let i = 0; i < FIR_WHORLS; i++) {
+        const t = i / FIR_WHORLS;
+        const yBase = FIR_HEIGHT * (FIR_BRANCH_START + (1 - FIR_BRANCH_START) * t) - (FIR_HEIGHT * 0.5);
+
+        const length = getFirBranchLengthAt(t);
+
+        const sag = 0.20 * Math.pow(1 - t, 0.9);
+        const count = 2 + Math.floor(rng() * 2);
+        const phase = rng() * Math.PI * 2.0;
+
+        for (let j = 0; j < count; j++) {
+          const angle = phase + (j / count) * Math.PI * 2.0 + THREE.MathUtils.lerp(-0.1, 0.1, rng());
+          setFirBranchDirection(dir, angle, t);
+          radial.set(dir.x, 0, dir.z);
+          if (radial.lengthSq() < 1e-8) radial.set(0, 0, 1);
+          radial.normalize();
+
+          const trunkR = FIR_TRUNK_RADIUS_TOP + (FIR_TRUNK_RADIUS_BASE - FIR_TRUNK_RADIUS_TOP) * Math.pow(1 - t, 2.0);
+          start.set(dir.x * trunkR * 1.05, yBase, dir.z * trunkR * 1.05);
+          const firstBaseHeight = THREE.MathUtils.clamp(length * (0.23 - 0.11 * FIR_BRANCH_SPRIG_START_T), 0.7, 5.0);
+          const topU = THREE.MathUtils.clamp((t - FIR_TOP_SHORT_START) / (1.0 - FIR_TOP_SHORT_START), 0, 1);
+          const topSprigStartScale = THREE.MathUtils.lerp(FIR_BRANCH_SPRIG_FIRST_SCALE, 1.15, topU);
+          let sprigScaleMul = topSprigStartScale;
+          let sprigRoll = 0;
+
+          for (let tt = FIR_BRANCH_SPRIG_START_T; tt <= 0.98;) {
+            const p = getBranchPoint(start, dir, gravity, length, sag, tt);
+
+            const yaw = Math.atan2(radial.x, radial.z) + Math.PI * 1.5;
+            euler.set(0, yaw, sprigRoll, 'YXZ');
+            quat.setFromEuler(euler);
+
+            const sprigHeight = Math.max(0.7, firstBaseHeight * sprigScaleMul);
+            const sprigWidth = sprigHeight * 0.28;
+            p.y -= sprigHeight * 0.9;
+            scale.set(sprigWidth, sprigHeight, 1);
+
+            localMatrices.push(new THREE.Matrix4().compose(p, quat, scale));
+
+            const alongBranchStep = sprigWidth * (1.0 - FIR_BRANCH_SPRIG_OVERLAP);
+            const denseStep = (alongBranchStep / Math.max(length, 1e-4)) / FIR_BRANCH_SPRIG_DENSITY_MULT;
+            const jitter = THREE.MathUtils.lerp(1.0 - FIR_BRANCH_SPRIG_SPACING_JITTER, 1.0 + FIR_BRANCH_SPRIG_SPACING_JITTER, rng());
+            const stepT = THREE.MathUtils.clamp(denseStep * jitter, 0.0025, FIR_BRANCH_SPRIG_STEP_T);
+            tt += stepT;
+            sprigRoll += THREE.MathUtils.degToRad(FIR_BRANCH_SPRIG_ROLL_STEP_DEG);
+            sprigScaleMul *= FIR_BRANCH_SPRIG_SCALE_STEP;
+          }
+        }
+      }
+
+      treeBranchSprigLocalMatrices = localMatrices;
+      return treeBranchSprigLocalMatrices;
+    }
+
     function clearTrees() {
-      if (!treeInstancesMesh) return;
-      levelRoot.remove(treeInstancesMesh);
-      treeInstancesMesh = null;
+      if (treeInstancesMesh) {
+        levelRoot.remove(treeInstancesMesh);
+        treeInstancesMesh = null;
+      }
+      if (treeBranchSprigInstancesMesh) {
+        levelRoot.remove(treeBranchSprigInstancesMesh);
+        treeBranchSprigInstancesMesh = null;
+      }
     }
 
     function collectTreeBlobsFromBitmap(data) {
@@ -2938,6 +3085,42 @@ const h = new Float32Array(mapW * mapH);
 
       treeInstancesMesh.instanceMatrix.needsUpdate = true;
       levelRoot.add(treeInstancesMesh);
+
+      const sprigLocals = buildDouglasFirBranchSprigLocalMatrices();
+      if (!treeBranchSprigTemplateGeometry) {
+        treeBranchSprigTemplateGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+        treeBranchSprigTemplateGeometry.translate(0, 0.5, 0);
+      }
+      if (!treeBranchSprigTemplateMaterial) {
+        const sprigTexture = new THREE.TextureLoader().load(window.__mfMemAssets?.getObjectUrl(FIR_BRANCH_SPRIG_URL) || FIR_BRANCH_SPRIG_URL);
+        sprigTexture.colorSpace = THREE.SRGBColorSpace;
+        treeBranchSprigTemplateMaterial = new THREE.MeshBasicMaterial({
+          map: sprigTexture,
+          transparent: true,
+          alphaTest: 0.3,
+          side: THREE.DoubleSide,
+          depthWrite: false
+        });
+      }
+
+      const sprigCount = blobs.length * sprigLocals.length;
+      treeBranchSprigInstancesMesh = new THREE.InstancedMesh(treeBranchSprigTemplateGeometry, treeBranchSprigTemplateMaterial, sprigCount);
+      treeBranchSprigInstancesMesh.castShadow = false;
+      treeBranchSprigInstancesMesh.receiveShadow = false;
+      treeBranchSprigInstancesMesh.frustumCulled = false;
+
+      const sprigMatrix = new THREE.Matrix4();
+      let sprigIndex = 0;
+      for (let i = 0; i < blobs.length; i++) {
+        treeInstancesMesh.getMatrixAt(i, m);
+        for (let j = 0; j < sprigLocals.length; j++) {
+          sprigMatrix.multiplyMatrices(m, sprigLocals[j]);
+          treeBranchSprigInstancesMesh.setMatrixAt(sprigIndex, sprigMatrix);
+          sprigIndex++;
+        }
+      }
+      treeBranchSprigInstancesMesh.instanceMatrix.needsUpdate = true;
+      levelRoot.add(treeBranchSprigInstancesMesh);
     }
 
     /* =========================
