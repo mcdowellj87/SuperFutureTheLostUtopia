@@ -5,3 +5,8 @@ assets/*
 
 .DS_Store
 Thumbs.db
+
+# Local design exports
+MezzaBeginning.png
+MezzaBeginning.svg
+mezzabeginning.html
