@@ -2745,6 +2745,11 @@ const h = new Float32Array(mapW * mapH);
     const FIR_BRANCH_SPRIG_POSITION_JITTER_T = 0.018;
     const FIR_BRANCH_SPRIG_TOP_INTERSECT_PORTION = 0.05;
     const FIR_BRANCH_SPRIG_SPACING_JITTER = 0.18;
+    const FIR_BRANCH_SPRIG_OUT_ANGLE_BASE_DEG = 4;
+    const FIR_BRANCH_SPRIG_OUT_ANGLE_TIP_DEG = 60;
+    const FIR_BRANCH_SPRIG_OUT_ANGLE_ACCEL = 1.45;
+    const FIR_BRANCH_SPRIG_ANGLE_VARIATION_FORWARD_PCT = 0.20;
+    const FIR_BRANCH_SPRIG_ANGLE_VARIATION_BACKWARD_PCT = 0.07;
 
     let treeInstancesMesh = null;
     let treeTemplateGeometry = null;
@@ -2899,13 +2904,15 @@ const h = new Float32Array(mapW * mapH);
       const gravity = new THREE.Vector3(0, -1, 0);
       const dir = new THREE.Vector3();
       const start = new THREE.Vector3();
-      const tangent = new THREE.Vector3();
       const up = new THREE.Vector3(0, 1, 0);
       const down = new THREE.Vector3(0, -1, 0);
+      const outward = new THREE.Vector3();
+      const hingeAxis = new THREE.Vector3();
       const scale = new THREE.Vector3();
       const quat = new THREE.Quaternion();
       const hangQuat = new THREE.Quaternion().setFromUnitVectors(up, down);
       const yawQuat = new THREE.Quaternion();
+      const hingeQuat = new THREE.Quaternion();
       const flipQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI);
       const localMatrices = [];
 
@@ -2928,38 +2935,68 @@ const h = new Float32Array(mapW * mapH);
           const firstBaseHeight = THREE.MathUtils.clamp(length * (0.23 - 0.11 * FIR_BRANCH_SPRIG_START_T), 0.7, 5.0);
           const topU = THREE.MathUtils.clamp((t - FIR_TOP_SHORT_START) / (1.0 - FIR_TOP_SHORT_START), 0, 1);
           const topSprigStartScale = THREE.MathUtils.lerp(FIR_BRANCH_SPRIG_FIRST_SCALE, 1.15, topU);
+          const branchSpanT = 0.98 - FIR_BRANCH_SPRIG_START_T;
+          const avgWidthRatio = (FIR_BRANCH_SPRIG_WIDTH_RATIO_BASE + FIR_BRANCH_SPRIG_WIDTH_RATIO_TIP) * 0.5;
+          const firstSprigWidth = Math.max(0.01, firstBaseHeight * topSprigStartScale * avgWidthRatio);
+          const alongBranchStep = firstSprigWidth * (1.0 - FIR_BRANCH_SPRIG_OVERLAP);
+          const denseStep = (alongBranchStep / Math.max(length, 1e-4)) / FIR_BRANCH_SPRIG_DENSITY_MULT;
+          const baseStepT = THREE.MathUtils.clamp(denseStep, 0.0025, FIR_BRANCH_SPRIG_STEP_T);
+          const estimatedSprigCount = Math.max(1, Math.floor((branchSpanT / Math.max(baseStepT, 1e-4)) * 1.1));
+          const gapCount = estimatedSprigCount + 1;
+          const gaps = new Array(gapCount);
+          let totalGapWeight = 0;
+          const gapWeightMin = Math.max(0.2, 1.0 - FIR_BRANCH_SPRIG_SPACING_JITTER * 3.0);
+          const gapWeightMax = 1.0 + FIR_BRANCH_SPRIG_SPACING_JITTER * 3.0;
+          for (let g = 0; g < gapCount; g++) {
+            const gapWeight = THREE.MathUtils.lerp(gapWeightMin, gapWeightMax, rngSprig());
+            gaps[g] = gapWeight;
+            totalGapWeight += gapWeight;
+          }
+
+          let cumulativeGapWeight = gaps[0];
           let sprigScaleMul = topSprigStartScale;
           let sprigRoll = 0;
 
-          for (let tt = FIR_BRANCH_SPRIG_START_T; tt <= 0.98;) {
+          for (let s = 0; s < estimatedSprigCount; s++) {
+            const tt = FIR_BRANCH_SPRIG_START_T + (cumulativeGapWeight / totalGapWeight) * branchSpanT;
             const ttJitter = THREE.MathUtils.lerp(-FIR_BRANCH_SPRIG_POSITION_JITTER_T, FIR_BRANCH_SPRIG_POSITION_JITTER_T, rngSprig());
             const ttSample = THREE.MathUtils.clamp(tt + ttJitter, FIR_BRANCH_SPRIG_START_T, 0.98);
             const p = getBranchPoint(start, dir, gravity, length, sag, ttSample);
+            const branchU = THREE.MathUtils.clamp((ttSample - FIR_BRANCH_SPRIG_START_T) / (0.98 - FIR_BRANCH_SPRIG_START_T), 0, 1);
 
-            tangent.copy(dir).multiplyScalar(length);
-            tangent.addScaledVector(gravity, sag * length * 1.4 * (1 - 2 * ttSample));
-            if (tangent.lengthSq() < 1e-8) tangent.copy(dir);
-            tangent.normalize();
             quat.copy(hangQuat);
             yawQuat.setFromAxisAngle(down, angle + sprigRoll);
             quat.premultiply(yawQuat);
+
+            outward.set(dir.x, 0, dir.z);
+            if (outward.lengthSq() < 1e-8) outward.copy(dir);
+            outward.normalize();
+            hingeAxis.crossVectors(down, outward).normalize();
+            const acceleratedU = Math.pow(branchU, FIR_BRANCH_SPRIG_OUT_ANGLE_ACCEL);
+            const outwardTiltBase = THREE.MathUtils.degToRad(
+              THREE.MathUtils.lerp(FIR_BRANCH_SPRIG_OUT_ANGLE_BASE_DEG, FIR_BRANCH_SPRIG_OUT_ANGLE_TIP_DEG, acceleratedU)
+            );
+            const outwardTiltVariationMul = THREE.MathUtils.lerp(
+              1.0 - FIR_BRANCH_SPRIG_ANGLE_VARIATION_BACKWARD_PCT,
+              1.0 + FIR_BRANCH_SPRIG_ANGLE_VARIATION_FORWARD_PCT,
+              rngSprig()
+            );
+            const outwardTilt = outwardTiltBase * outwardTiltVariationMul;
+            hingeQuat.setFromAxisAngle(hingeAxis, outwardTilt);
+            quat.premultiply(hingeQuat);
             quat.multiply(flipQuat);
 
-            const sprigHeight = Math.max(0.7, firstBaseHeight * sprigScaleMul);
-            const branchU = THREE.MathUtils.clamp((ttSample - FIR_BRANCH_SPRIG_START_T) / (0.98 - FIR_BRANCH_SPRIG_START_T), 0, 1);
+            const trunkZoneScale = branchU < 0.6 ? 0.6 : 1.0;
+            const sprigHeight = Math.max(0.7, firstBaseHeight * sprigScaleMul * trunkZoneScale);
             const widthRatio = THREE.MathUtils.lerp(FIR_BRANCH_SPRIG_WIDTH_RATIO_BASE, FIR_BRANCH_SPRIG_WIDTH_RATIO_TIP, branchU);
             const sprigWidth = sprigHeight * widthRatio;
             scale.set(sprigWidth, sprigHeight, 1);
 
             localMatrices.push(new THREE.Matrix4().compose(p, quat, scale));
 
-            const alongBranchStep = sprigWidth * (1.0 - FIR_BRANCH_SPRIG_OVERLAP);
-            const denseStep = (alongBranchStep / Math.max(length, 1e-4)) / FIR_BRANCH_SPRIG_DENSITY_MULT;
-            const jitter = THREE.MathUtils.lerp(1.0 - FIR_BRANCH_SPRIG_SPACING_JITTER, 1.0 + FIR_BRANCH_SPRIG_SPACING_JITTER, rngSprig());
-            const stepT = THREE.MathUtils.clamp(denseStep * jitter, 0.0025, FIR_BRANCH_SPRIG_STEP_T);
-            tt += stepT;
             sprigRoll += THREE.MathUtils.degToRad(FIR_BRANCH_SPRIG_ROLL_STEP_DEG);
             sprigScaleMul *= FIR_BRANCH_SPRIG_SCALE_STEP;
+            cumulativeGapWeight += gaps[s + 1];
           }
         }
       }
