@@ -10,3 +10,7 @@ Thumbs.db
 MezzaBeginning.png
 MezzaBeginning.svg
 mezzabeginning.html
+
+# Keep map images trackable even if broader PNG rules are added later
+!map.png
+!images/map.png
