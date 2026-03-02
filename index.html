@@ -1454,7 +1454,9 @@
     ========================= */
     const CELL_M = 1.0;
     const BASE_MAX_HEIGHT = 140.0;
-    const HEIGHT_CURVE_POW = 0.85;
+    const HEIGHT_MULTIPLIER = 2.0; // all terrain elevations are globally doubled
+    const HEIGHT_CURVE_POW = 1.35; // lighter greens accelerate upward height gain
+    const HEIGHT_LIGHT_TAPER = 0.25; // soft-rolls off the brightest greens
 
     const PLAYER_SCALE = 25.0; // was 2.0 — hero is 10x smaller
     const BASE_EYE_HEIGHT = 1.7;
@@ -1484,6 +1486,7 @@
        HEIGHTFIELD SHAPE CONTROL (NO NEW GEOMETRY)
     ========================= */
     const TOP_FLAT_GN_THRESHOLD = 0.92; // tweak 0.88..0.96
+    const TOP_FLATTEN_STRENGTH = 0.0;   // 0 = rounded peaks, 1 = hard mesa flattening
     const SLOPE_PASSES = 16;            // 10..24
 
     /* =========================
@@ -2339,8 +2342,9 @@ const h = new Float32Array(mapW * mapH);
 
           if (isGreenish(r, g, b)) {
             const gn = (g - minLandG) / Math.max(1, (255 - minLandG));
-            const t = Math.pow(THREE.MathUtils.clamp(gn, 0, 1), HEIGHT_CURVE_POW);
-            h[i] = t * BASE_MAX_HEIGHT;
+            const tRaw = Math.pow(THREE.MathUtils.clamp(gn, 0, 1), HEIGHT_CURVE_POW);
+            const t = tRaw * (1.0 - HEIGHT_LIGHT_TAPER * tRaw);
+            h[i] = t * BASE_MAX_HEIGHT * HEIGHT_MULTIPLIER;
 
             if (gn >= TOP_FLAT_GN_THRESHOLD) topMask[i] = 1;
           } else {
@@ -2380,14 +2384,15 @@ const h = new Float32Array(mapW * mapH);
         if (wmask[i]) continue;
         if (topMask[i]) topH = Math.max(topH, sm[i]);
       }
-      if (topH > -Infinity) {
+      if (topH > -Infinity && TOP_FLATTEN_STRENGTH > 0) {
         for (let i = 0; i < sm.length; i++) {
           if (wmask[i]) continue;
-          if (topMask[i]) sm[i] = topH;
+          if (topMask[i]) sm[i] = THREE.MathUtils.lerp(sm[i], topH, TOP_FLATTEN_STRENGTH);
         }
       }
 
-      sm = smoothHeightsLandOnlyLocked(sm, wmask, topMask, SLOPE_PASSES);
+      const slopeLockMask = (TOP_FLATTEN_STRENGTH > 0) ? topMask : new Uint8Array(topMask.length);
+      sm = smoothHeightsLandOnlyLocked(sm, wmask, slopeLockMask, SLOPE_PASSES);
 
       let maxH = 0;
       for (let i = 0; i < sm.length; i++) {
@@ -2720,8 +2725,13 @@ const h = new Float32Array(mapW * mapH);
     const FIR_BRANCH_SEGMENTS = 6;
     const FIR_HIDE_BRANCHES = false;
     const FIR_BRANCH_LENGTH_SCALE = 2 / 3;
+    const FIR_BRANCH_LENGTH_RANDOM_TRUNK_PCT = 0.10;
     const FIR_TOP_SHORT_START = 0.93;
     const FIR_TOP_SHORT_END_SCALE = 0.0875;
+    const FIR_TOPMOST_BRANCH_START = 0.90;
+    const FIR_TOPMOST_BRANCH_DOWN_DEG = 15;
+    const FIR_TOPMOST_BRANCH_DOWN_RAD = THREE.MathUtils.degToRad(FIR_TOPMOST_BRANCH_DOWN_DEG);
+    const FIR_TOPMOST_BRANCH_LENGTH_SCALE = 2 / 3;
     const FIR_TOP_UP_DEG = 40;
     const FIR_TOP_UP_RAD = THREE.MathUtils.degToRad(FIR_TOP_UP_DEG);
     const FIR_LOWER_BRANCH_FRACTION = 1 / 3;
@@ -2757,6 +2767,7 @@ const h = new Float32Array(mapW * mapH);
     let treeBranchSprigInstancesMesh = null;
     let treeBranchSprigTemplateGeometry = null;
     let treeBranchSprigTemplateMaterial = null;
+    let treeBranchSprigTexture = null;
     let treeBranchSprigLocalMatrices = null;
 
     function getBranchPoint(start, dir, gravity, length, sag, t) {
@@ -2776,7 +2787,14 @@ const h = new Float32Array(mapW * mapH);
     }
 
     function setFirBranchDirection(out, angle, t) {
-      if (t >= FIR_TOP_SHORT_START) {
+      if (t >= FIR_TOPMOST_BRANCH_START) {
+        const horizontal = Math.cos(FIR_TOPMOST_BRANCH_DOWN_RAD);
+        out.set(
+          Math.cos(angle) * horizontal,
+          -Math.sin(FIR_TOPMOST_BRANCH_DOWN_RAD),
+          Math.sin(angle) * horizontal
+        );
+      } else if (t >= FIR_TOP_SHORT_START) {
         const horizontal = Math.cos(FIR_TOP_UP_RAD);
         out.set(
           Math.cos(angle) * horizontal,
@@ -2810,11 +2828,24 @@ const h = new Float32Array(mapW * mapH);
 
     function getFirBranchLengthAt(t) {
       let length = 16.0 * (1 - t * 0.6) * FIR_BRANCH_LENGTH_SCALE;
+      if (t >= FIR_TOPMOST_BRANCH_START) {
+        length *= FIR_TOPMOST_BRANCH_LENGTH_SCALE;
+      }
       if (t >= FIR_TOP_SHORT_START) {
         const u = THREE.MathUtils.clamp((t - FIR_TOP_SHORT_START) / (1.0 - FIR_TOP_SHORT_START), 0, 1);
         length *= THREE.MathUtils.lerp(1.0, FIR_TOP_SHORT_END_SCALE, u);
       }
       return length;
+    }
+
+    function getFirBranchCount(rand) {
+      // Original branch count was 2-3; this keeps random distribution but doubles average to 4-6.
+      return 4 + Math.floor(rand() * 3);
+    }
+
+    function getFirBranchLengthMul(rand) {
+      // Randomly shorten each branch by up to ~10% toward the trunk.
+      return THREE.MathUtils.lerp(1.0 - FIR_BRANCH_LENGTH_RANDOM_TRUNK_PCT, 1.0, rand());
     }
 
     function buildDouglasFirTemplateGeometry() {
@@ -2850,14 +2881,15 @@ const h = new Float32Array(mapW * mapH);
         const t = i / FIR_WHORLS;
         const yBase = FIR_HEIGHT * (FIR_BRANCH_START + (1 - FIR_BRANCH_START) * t) - (FIR_HEIGHT * 0.5);
 
-        const length = getFirBranchLengthAt(t);
+        const lengthBase = getFirBranchLengthAt(t);
 
         const sag = 0.20 * Math.pow(1 - t, 0.9);
         const thickness = 0.12 * Math.pow(1 - t, 0.8);
-        const count = 2 + Math.floor(rng() * 2);
+        const count = getFirBranchCount(rng);
         const phase = rng() * Math.PI * 2.0;
 
         for (let j = 0; j < count; j++) {
+          const length = lengthBase * getFirBranchLengthMul(rng);
           const angle = phase + (j / count) * Math.PI * 2.0 + THREE.MathUtils.lerp(-0.1, 0.1, rng());
           setFirBranchDirection(dir, angle, t);
 
@@ -2920,13 +2952,14 @@ const h = new Float32Array(mapW * mapH);
         const t = i / FIR_WHORLS;
         const yBase = FIR_HEIGHT * (FIR_BRANCH_START + (1 - FIR_BRANCH_START) * t) - (FIR_HEIGHT * 0.5);
 
-        const length = getFirBranchLengthAt(t);
+        const lengthBase = getFirBranchLengthAt(t);
 
         const sag = 0.20 * Math.pow(1 - t, 0.9);
-        const count = 2 + Math.floor(rngBranch() * 2);
+        const count = getFirBranchCount(rngBranch);
         const phase = rngBranch() * Math.PI * 2.0;
 
         for (let j = 0; j < count; j++) {
+          const length = lengthBase * getFirBranchLengthMul(rngBranch);
           const angle = phase + (j / count) * Math.PI * 2.0 + THREE.MathUtils.lerp(-0.1, 0.1, rngBranch());
           setFirBranchDirection(dir, angle, t);
 
@@ -3014,6 +3047,15 @@ const h = new Float32Array(mapW * mapH);
         levelRoot.remove(treeBranchSprigInstancesMesh);
         treeBranchSprigInstancesMesh = null;
       }
+    }
+
+    function getTreeBranchSprigTexture() {
+      if (treeBranchSprigTexture) return treeBranchSprigTexture;
+      treeBranchSprigTexture = new THREE.TextureLoader().load(
+        window.__mfMemAssets?.getObjectUrl(FIR_BRANCH_SPRIG_URL) || FIR_BRANCH_SPRIG_URL
+      );
+      treeBranchSprigTexture.colorSpace = THREE.SRGBColorSpace;
+      return treeBranchSprigTexture;
     }
 
     function collectTreeBlobsFromBitmap(data) {
@@ -3143,10 +3185,8 @@ const h = new Float32Array(mapW * mapH);
         treeBranchSprigTemplateGeometry.translate(0, FIR_BRANCH_SPRIG_TOP_INTERSECT_PORTION - 0.5, 0);
       }
       if (!treeBranchSprigTemplateMaterial) {
-        const sprigTexture = new THREE.TextureLoader().load(window.__mfMemAssets?.getObjectUrl(FIR_BRANCH_SPRIG_URL) || FIR_BRANCH_SPRIG_URL);
-        sprigTexture.colorSpace = THREE.SRGBColorSpace;
         treeBranchSprigTemplateMaterial = new THREE.MeshBasicMaterial({
-          map: sprigTexture,
+          map: getTreeBranchSprigTexture(),
           transparent: true,
           alphaTest: 0.3,
           side: THREE.DoubleSide,
@@ -3956,24 +3996,26 @@ const h = new Float32Array(mapW * mapH);
       const ctx = c.getContext('2d', { willReadFrequently: true });
       ctx.drawImage(bmp, 0, 0);
       const data = ctx.getImageData(0, 0, mapW, mapH).data;
+      const dataOriginal = new Uint8ClampedArray(data);
+      const dataForHeights = new Uint8ClampedArray(data);
 
-      // Read explicit map markers before height derivation mutates pixel channels.
-      const sp = findPlayerSpawn(data);
-      const frSpawn = findFusionReactorSpawn(data);
+      // Marker/object extraction should use original pixels; height derivation mutates channels.
+      const sp = findPlayerSpawn(dataOriginal);
+      const frSpawn = findFusionReactorSpawn(dataOriginal);
 
-      const derived = deriveHeightsAndWater(data);
+      const derived = deriveHeightsAndWater(dataForHeights);
       heights = derived.heights;
       waterMask = derived.waterMask;
 
       buildTerrainMesh();
       buildWorldSeaPlane();
 
-      const blobs = collectTreeBlobsFromBitmap(data);
+      const blobs = collectTreeBlobsFromBitmap(dataOriginal);
       buildTreeInstancesFromBlobs(blobs);
 
-      buildBuildingPerimeterFromBitmap(data);
+      buildBuildingPerimeterFromBitmap(dataOriginal);
 
-      const bridgeBand = collectBridgeBandFromBitmap(data);
+      const bridgeBand = collectBridgeBandFromBitmap(dataOriginal);
       buildBridgePrism(bridgeBand);
 
       rebuildColliderGrid();
