@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Introduction Cutscene</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#2e7d32; }
+  canvas { display:block; }
+  /* Keep the SVG available for texture loading (but invisible). */
+  #mezzaImg { position:fixed; left:-99999px; top:-99999px; width:1024px; height:auto; }
+</style>
+</head>
+<body>
+
+<!-- This SVG becomes the texture on the bisecting plane -->
+<img id="mezzaImg" src="MezzaBeginning.svg" alt="MezzaBeginning" />
+
+<script type="module">
+  import * as THREE from "./vendor/three.module.js";
+
+  // Optional, but handy for debugging:
+  // import { OrbitControls } from "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+
+  const BG = 0x2e7d32;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.localClippingEnabled = true;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(BG, 1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 100);
+  camera.position.set(0, 0, 3.2);
+
+  // const controls = new OrbitControls(camera, renderer.domElement);
+  // controls.enableDamping = true;
+
+  // --- Lights (soft, “bio” feeling) ---
+  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+
+  const key = new THREE.DirectionalLight(0xffffff, 0.9);
+  key.position.set(2.5, 2.0, 3.0);
+  scene.add(key);
+
+  const fill = new THREE.DirectionalLight(0xffffff, 0.35);
+  fill.position.set(-2.0, -1.0, 2.5);
+  scene.add(fill);
+
+  // --- Egg shell (translucent for now) ---
+  // NOTE: true transmission looks best on newer Three versions + proper tone mapping;
+  // This setup is intentionally simple and stable.
+  const eggGeo = new THREE.SphereGeometry(1, 96, 96);
+  // “Eggify” it: slightly taller, slightly narrower
+  eggGeo.scale(0.9, 1.25, 0.9);
+
+  // Chicken-egg profile: wider at the bottom, narrower at the top.
+  const pos = eggGeo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    // Normalize y to 0..1 (bottom..top) based on radius 1
+    const t = (v.y + 1) * 0.5;
+    const bottomScale = 1.15;
+    const topScale = 0.72;
+    const s = bottomScale + (topScale - bottomScale) * t;
+    v.x *= s;
+    v.z *= s;
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  pos.needsUpdate = true;
+  eggGeo.computeVertexNormals();
+
+  const eggMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    roughness: 0.35,
+    metalness: 0.0,
+    transparent: false,
+    opacity: 1.0,
+
+    // Soft highlights:
+    specularIntensity: 0.6,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.35,
+  });
+
+  // Half-shell cut: vertical plane through the egg's center (keeps x >= 0).
+  const halfCut = new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+  eggMat.clippingPlanes = [halfCut];
+
+  const egg = new THREE.Mesh(eggGeo, eggMat);
+
+  // Shell thickness: inner surface slightly scaled down, rendered backfaces.
+  const innerGeo = eggGeo.clone();
+  innerGeo.scale(0.92, 0.92, 0.92);
+  const innerMat = eggMat.clone();
+  innerMat.side = THREE.BackSide;
+  innerMat.clippingPlanes = [halfCut];
+  const inner = new THREE.Mesh(innerGeo, innerMat);
+
+  // Group so the shell rotates together.
+  const shell = new THREE.Group();
+  shell.add(egg);
+  shell.add(inner);
+  shell.scale.set(0.5335, 0.5335, 0.5335);
+  shell.position.y = 0.06;
+
+  function makeEggCutRingShape(segments = 240) {
+    const outer = [];
+    const inner = [];
+    const yScale = 1.25;
+    const xzScale = 0.9;
+    const taperBase = 0.935;
+    const taperSlope = 0.26875;
+    const innerScale = 0.92;
+
+    for (let i = 0; i <= segments; i++) {
+      const a = -Math.PI * 0.5 + (Math.PI * i / segments);
+      const sy = Math.sin(a);
+      const cy = Math.cos(a);
+      const y = yScale * sy;
+      const taper = taperBase - taperSlope * sy;
+      const z = xzScale * taper * cy;
+      outer.push(new THREE.Vector2(z, y));
+      inner.push(new THREE.Vector2(z * innerScale, y * innerScale));
+    }
+
+    const shape = new THREE.Shape();
+    shape.moveTo(outer[0].x, outer[0].y);
+    for (let i = 1; i < outer.length; i++) shape.lineTo(outer[i].x, outer[i].y);
+    for (let i = outer.length - 1; i >= 0; i--) shape.lineTo(-outer[i].x, outer[i].y);
+    shape.closePath();
+
+    const hole = new THREE.Path();
+    hole.moveTo(inner[0].x, inner[0].y);
+    for (let i = 1; i < inner.length; i++) hole.lineTo(inner[i].x, inner[i].y);
+    for (let i = inner.length - 1; i >= 0; i--) hole.lineTo(-inner[i].x, inner[i].y);
+    hole.closePath();
+    shape.holes.push(hole);
+
+    return shape;
+  }
+
+  const cutFaceGeo = new THREE.ShapeGeometry(makeEggCutRingShape(), 128);
+  cutFaceGeo.rotateY(Math.PI * 0.5);
+  const cutFaceMat = new THREE.MeshStandardMaterial({
+    color: 0xf6f1df,
+    roughness: 0.72,
+    metalness: 0.0,
+    side: THREE.DoubleSide,
+  });
+  const cutFace = new THREE.Mesh(cutFaceGeo, cutFaceMat);
+  cutFace.position.x = 0.0008;
+  shell.add(cutFace);
+  scene.add(shell);
+
+  // --- Bisecting plane: the SVG sits on a plane that cuts the egg in half ---
+  // We’ll create this once the SVG loads, so we can preserve its aspect ratio.
+  const mezzaImg = document.getElementById("mezzaImg");
+
+  let mezzaPlane = null;
+
+  function makeTextureFromSVGImage(imgEl) {
+    // Draw the SVG image into a canvas, then use that as a Three texture.
+    const w = imgEl.naturalWidth || 1024;
+    const h = imgEl.naturalHeight || 1024;
+
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d");
+
+    // Transparent background; draw the SVG as-is
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(imgEl, 0, 0, w, h);
+
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    tex.needsUpdate = true;
+    return { tex, w, h };
+  }
+
+  function buildMezzaPlane() {
+    const { tex, w, h } = makeTextureFromSVGImage(mezzaImg);
+    const aspect = w / h;
+
+    // Plane height relative to egg size (tweakable).
+    // Egg radius ~1, height ~2.3 after scale. We’ll fit Mezza comfortably inside.
+    const planeH = 1.85;
+    const planeW = planeH * aspect;
+
+    const geo = new THREE.PlaneGeometry(planeW, planeH, 1, 1);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      opacity: 1.0,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    });
+
+    mezzaPlane = new THREE.Mesh(geo, mat);
+
+    // Bisecting plane left unchanged from original SVG setup.
+    mezzaPlane.position.set(-0.01, 0, 0);
+    mezzaPlane.position.z = 0.0005;
+
+    scene.add(mezzaPlane);
+  }
+
+  // SVGs often need a local server to load as an image in JS reliably.
+  // If you see a blank plane, run: `python3 -m http.server` in the folder.
+  if (mezzaImg.complete) {
+    buildMezzaPlane();
+  } else {
+    mezzaImg.addEventListener("load", buildMezzaPlane, { once: true });
+  }
+
+  // --- Animation ---
+  let t = 0;
+  function animate() {
+    t += 0.01;
+
+    // Constant spin around vertical axis.
+    shell.rotation.y += 0.01;
+    // Keep the clipping plane rotating with the shell and centered on shell origin.
+    halfCut.normal.set(1, 0, 0).applyQuaternion(shell.quaternion);
+    halfCut.constant = -halfCut.normal.dot(shell.position);
+
+    // If you ever want the plane to stay world-still while the egg rotates around it,
+    // leave plane rotation at 0 (default). That keeps it as a “cut” through the egg.
+
+    // controls?.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  }
+  animate();
+
+  // --- Resize ---
+  window.addEventListener("resize", () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+  });
+</script>
+
+</body>
+</html>
