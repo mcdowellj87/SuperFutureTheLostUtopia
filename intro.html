@@ -8,7 +8,7 @@
   html, body { margin:0; height:100%; overflow:hidden; background:#3AD7FF; }
   canvas { display:block; }
   /* Keep the SVG available for texture loading (but invisible). */
-  #mezzaSvg { position:fixed; left:-99999px; top:-99999px; width:1024px; height:auto; }
+  #mezzaSvg { display:none; position:fixed; left:-99999px; top:-99999px; width:1024px; height:auto; }
 </style>
 </head>
 <body>
@@ -221,8 +221,13 @@
   scene.add(shell);
 
   // --- Bisecting plane: the SVG sits on a plane that cuts the egg in half ---
-  // We serialize the inline SVG to an in-memory image so we can draw it to canvas.
-  const mezzaSvg = document.getElementById("mezzaSvg");
+  // Toggle whether to use/load the inline SVG source.
+  const USE_INLINE_MEZZA_SVG = false;
+  // We serialize the inline SVG to an in-memory image only when enabled.
+  let mezzaSvg = null;
+  const inlineMezzaSvg = document.getElementById("mezzaSvg");
+  if (USE_INLINE_MEZZA_SVG) mezzaSvg = inlineMezzaSvg;
+  else if (inlineMezzaSvg) inlineMezzaSvg.remove();
 
   let mezzaPlane = null;
   let mezzaGroup = null;
@@ -271,9 +276,14 @@
   }
 
   async function buildMezzaPlane() {
-    const mezzaImg = await svgToImage(mezzaSvg);
-    const { tex, w, h } = makeTextureFromImage(mezzaImg);
-    const aspect = w / h;
+    let tex = null;
+    let aspect = 1501.0909 / 2001.4545; // original Mezza SVG aspect
+    if (USE_INLINE_MEZZA_SVG && mezzaSvg) {
+      const mezzaImg = await svgToImage(mezzaSvg);
+      const texInfo = makeTextureFromImage(mezzaImg);
+      tex = texInfo.tex;
+      aspect = texInfo.w / texInfo.h;
+    }
 
     // Plane height relative to egg size (tweakable).
     // Egg radius ~1, height ~2.3 after scale. We’ll fit Mezza comfortably inside.
@@ -281,22 +291,23 @@
     const planeW = planeH * aspect;
 
     const geo = new THREE.PlaneGeometry(planeW, planeH, 1, 1);
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      opacity: 1.0,
-      side: THREE.DoubleSide,
-      depthTest: true,
-      depthWrite: false,
-    });
-
     mezzaGroup = new THREE.Group();
     mezzaGroup.position.set(-0.01, 0, 0.0005);
     scene.add(mezzaGroup);
 
-    mezzaPlane = new THREE.Mesh(geo, mat);
-    mezzaPlane.position.set(0, 0, 0);
-    mezzaGroup.add(mezzaPlane);
+    if (tex) {
+      const mat = new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 1.0,
+        side: THREE.DoubleSide,
+        depthTest: true,
+        depthWrite: false,
+      });
+      mezzaPlane = new THREE.Mesh(geo, mat);
+      mezzaPlane.position.set(0, 0, 0);
+      mezzaGroup.add(mezzaPlane);
+    }
 
     const shardUrls = Array.from({ length: 14 }, (_, i) => `./images/shard_${i + 1}.png`);
     const texLoader = new THREE.TextureLoader();
