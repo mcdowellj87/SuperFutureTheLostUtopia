@@ -1342,6 +1342,10 @@
 
   <script type="module">
     import * as THREE from 'three';
+    const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
+    const WORLD_DETAIL = IS_FIREFOX
+      ? { pixelRatio: 1, antialias: false, sampleStep: 8, smoothPasses: 2, slopePasses: 8, maxTrees: 2600 }
+      : { pixelRatio: Math.min(devicePixelRatio, 1.5), antialias: true, sampleStep: 4, smoothPasses: 3, slopePasses: 16, maxTrees: 12000 };
     import { GLTFLoader } from './vendor/GLTFLoader.js';
     import { mergeGeometries } from './utils/BufferGeometryUtils.js';
 
@@ -1352,8 +1356,8 @@
     const HERO_WALK_GLB = './assets/mezza_walking.glb';
     const HERO_RUN_GLB = './assets/mezza_running.glb';
     const HERO_IDLE_GLB = './assets/mezza_idle.glb';
-    const FUSION_REACTOR_GLB = './assets/FusionReactor.glb';
-    const FUSION_REACTOR_GLB_FALLBACK = 'https://media.githubusercontent.com/media/mcdowellj87/SuperFutureTheLostUtopia/main/assets/FusionReactor.glb';
+    const FUSION_REACTOR_GLB = 'https://media.githubusercontent.com/media/mcdowellj87/SuperFutureTheLostUtopia/main/assets/FusionReactor.glb';
+    const FUSION_REACTOR_GLB_FALLBACK = FUSION_REACTOR_GLB;
     const FIR_BRANCH_SPRIG_URL = './images/branch.png';
 
     /* =========================
@@ -1478,8 +1482,8 @@
     const AIR_FRICTION = 0.0;
 
     /* Terrain mesh density */
-    const SAMPLE_STEP = 4;
-    const SMOOTH_PASSES = 3;
+    const SAMPLE_STEP = WORLD_DETAIL.sampleStep;
+    const SMOOTH_PASSES = WORLD_DETAIL.smoothPasses;
     const TOL = 24;
 
     /* =========================
@@ -1487,7 +1491,7 @@
     ========================= */
     const TOP_FLAT_GN_THRESHOLD = 0.92; // tweak 0.88..0.96
     const TOP_FLATTEN_STRENGTH = 0.0;   // 0 = rounded peaks, 1 = hard mesa flattening
-    const SLOPE_PASSES = 16;            // 10..24
+    const SLOPE_PASSES = WORLD_DETAIL.slopePasses; // lower in Firefox to reduce startup work
 
     /* =========================
        PHYSICS
@@ -1860,9 +1864,8 @@
        RENDERER / SCENE
     ========================= */
     const canvas = document.getElementById('c');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
-    renderer.setPixelRatio(IS_FIREFOX ? 1 : Math.min(devicePixelRatio, 1.5));
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: WORLD_DETAIL.antialias, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(WORLD_DETAIL.pixelRatio);
     renderer.setSize(innerWidth, innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -3132,6 +3135,9 @@ const h = new Float32Array(mapW * mapH);
     function buildTreeInstancesFromBlobs(blobs) {
       clearTrees();
       if (!blobs.length) return;
+      if (blobs.length > WORLD_DETAIL.maxTrees) {
+        blobs = blobs.slice(0, WORLD_DETAIL.maxTrees);
+      }
 
       const geo = buildDouglasFirTemplateGeometry();
       if (!treeTemplateMaterial) {
@@ -3148,7 +3154,7 @@ const h = new Float32Array(mapW * mapH);
       treeInstancesMesh = new THREE.InstancedMesh(geo, treeTemplateMaterial, blobs.length);
       treeInstancesMesh.castShadow = false;
       treeInstancesMesh.receiveShadow = false;
-      treeInstancesMesh.frustumCulled = false;
+      treeInstancesMesh.frustumCulled = !IS_FIREFOX;
 
       const m = new THREE.Matrix4();
       const p = new THREE.Vector3();
@@ -3198,7 +3204,7 @@ const h = new Float32Array(mapW * mapH);
       treeBranchSprigInstancesMesh = new THREE.InstancedMesh(treeBranchSprigTemplateGeometry, treeBranchSprigTemplateMaterial, sprigCount);
       treeBranchSprigInstancesMesh.castShadow = false;
       treeBranchSprigInstancesMesh.receiveShadow = false;
-      treeBranchSprigInstancesMesh.frustumCulled = false;
+      treeBranchSprigInstancesMesh.frustumCulled = !IS_FIREFOX;
 
       const sprigMatrix = new THREE.Matrix4();
       let sprigIndex = 0;

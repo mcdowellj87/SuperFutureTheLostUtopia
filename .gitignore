@@ -15,3 +15,7 @@ mezzabeginning.html
 !map.png
 !images/map.png
 !images/shard_*.png
+
+node_modules/
+dist/
+!images/mezza_beginning.png
