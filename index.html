@@ -1344,8 +1344,8 @@
     import * as THREE from 'three';
     const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
     const WORLD_DETAIL = IS_FIREFOX
-      ? { pixelRatio: 1, antialias: false, sampleStep: 8, smoothPasses: 2, slopePasses: 8, maxTrees: 2600 }
-      : { pixelRatio: Math.min(devicePixelRatio, 1.5), antialias: true, sampleStep: 4, smoothPasses: 3, slopePasses: 16, maxTrees: 12000 };
+      ? { pixelRatio: 0.75, antialias: false, sampleStep: 12, smoothPasses: 1, slopePasses: 4, maxTrees: 900, targetFps: 30 }
+      : { pixelRatio: Math.min(devicePixelRatio, 1.5), antialias: true, sampleStep: 4, smoothPasses: 3, slopePasses: 16, maxTrees: 12000, targetFps: 60 };
     import { GLTFLoader } from './vendor/GLTFLoader.js';
     import { mergeGeometries } from './utils/BufferGeometryUtils.js';
 
@@ -1353,9 +1353,9 @@
        FILES
     ========================= */
     const MAP_URL = './images/map.png';
-    const HERO_WALK_GLB = './assets/mezza_walking.glb';
-    const HERO_RUN_GLB = './assets/mezza_running.glb';
-    const HERO_IDLE_GLB = './assets/mezza_idle.glb';
+    const HERO_WALK_GLB = null;
+    const HERO_RUN_GLB = null;
+    const HERO_IDLE_GLB = null;
     const FUSION_REACTOR_GLB = 'https://media.githubusercontent.com/media/mcdowellj87/SuperFutureTheLostUtopia/main/assets/FusionReactor.glb';
     const FUSION_REACTOR_GLB_FALLBACK = FUSION_REACTOR_GLB;
     const FIR_BRANCH_SPRIG_URL = './images/branch.png';
@@ -2763,6 +2763,11 @@ const h = new Float32Array(mapW * mapH);
     const FIR_BRANCH_SPRIG_OUT_ANGLE_ACCEL = 1.45;
     const FIR_BRANCH_SPRIG_ANGLE_VARIATION_FORWARD_PCT = 0.20;
     const FIR_BRANCH_SPRIG_ANGLE_VARIATION_BACKWARD_PCT = 0.07;
+    const FIR_TWIG_RADIAL_SEGMENTS = 3;
+    const FIR_TWIG_START_T = 0.18;
+    const FIR_TWIG_LENGTH = 3.4;
+    const FIR_TWIG_RADIUS_BASE = 0.055;
+    const FIR_TWIG_RADIUS_TIP = 0.012;
 
     let treeInstancesMesh = null;
     let treeTemplateGeometry = null;
@@ -2851,6 +2856,18 @@ const h = new Float32Array(mapW * mapH);
       return THREE.MathUtils.lerp(1.0 - FIR_BRANCH_LENGTH_RANDOM_TRUNK_PCT, 1.0, rand());
     }
 
+    function addTubeBetween(parts, a, b, radiusBase, radiusTip, up, q, mid) {
+      const segLen = a.distanceTo(b);
+      if (segLen <= 1e-4) return;
+
+      const tube = new THREE.CylinderGeometry(radiusTip, radiusBase, segLen, FIR_TWIG_RADIAL_SEGMENTS, 1, false);
+      mid.copy(a).add(b).multiplyScalar(0.5);
+      q.setFromUnitVectors(up, b.clone().sub(a).normalize());
+      tube.applyQuaternion(q);
+      tube.translate(mid.x, mid.y, mid.z);
+      parts.push(tube);
+    }
+
     function buildDouglasFirTemplateGeometry() {
       if (treeTemplateGeometry) return treeTemplateGeometry;
 
@@ -2878,6 +2895,10 @@ const h = new Float32Array(mapW * mapH);
       const b = new THREE.Vector3();
       const mid = new THREE.Vector3();
       const up = new THREE.Vector3(0, 1, 0);
+      const side = new THREE.Vector3();
+      const twigDir = new THREE.Vector3();
+      const twigStart = new THREE.Vector3();
+      const twigEnd = new THREE.Vector3();
       const q = new THREE.Quaternion();
 
       for (let i = 0; i < FIR_WHORLS; i++) {
@@ -2911,15 +2932,38 @@ const h = new Float32Array(mapW * mapH);
             for (let k = 0; k < FIR_BRANCH_SEGMENTS; k++) {
               a.copy(points[k]);
               b.copy(points[k + 1]);
-              const segLen = a.distanceTo(b);
-              if (segLen <= 1e-4) continue;
+              addTubeBetween(parts, a, b, thickness, thickness, up, q, mid);
 
-              const seg = new THREE.CylinderGeometry(thickness, thickness, segLen, 5, 1, false);
-              mid.copy(a).add(b).multiplyScalar(0.5);
-              q.setFromUnitVectors(up, b.clone().sub(a).normalize());
-              seg.applyQuaternion(q);
-              seg.translate(mid.x, mid.y, mid.z);
-              parts.push(seg);
+              const branchU = (k + 0.5) / FIR_BRANCH_SEGMENTS;
+              if (branchU < FIR_TWIG_START_T) continue;
+
+              side.crossVectors(up, dir);
+              if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
+              side.normalize();
+
+              const twigLen = FIR_TWIG_LENGTH * Math.pow(1 - branchU, 0.82) * THREE.MathUtils.lerp(1.2, 0.45, t);
+              const twigRadius = FIR_TWIG_RADIUS_BASE * Math.pow(1 - branchU, 0.65) * THREE.MathUtils.lerp(1.2, 0.55, t);
+              const sideSign = ((k + j) % 2 === 0) ? 1 : -1;
+
+              twigStart.copy(a).lerp(b, 0.54);
+              twigDir.copy(dir)
+                .multiplyScalar(0.28)
+                .addScaledVector(side, sideSign * 0.52)
+                .addScaledVector(gravity, 0.72)
+                .normalize();
+              twigEnd.copy(twigStart).addScaledVector(twigDir, twigLen);
+              addTubeBetween(parts, twigStart, twigEnd, twigRadius, FIR_TWIG_RADIUS_TIP, up, q, mid);
+
+              if (branchU < 0.78 && t < 0.92) {
+                twigStart.copy(a).lerp(b, 0.82);
+                twigDir.copy(dir)
+                  .multiplyScalar(0.18)
+                  .addScaledVector(side, -sideSign * 0.42)
+                  .addScaledVector(gravity, 0.82)
+                  .normalize();
+                twigEnd.copy(twigStart).addScaledVector(twigDir, twigLen * 0.72);
+                addTubeBetween(parts, twigStart, twigEnd, twigRadius * 0.82, FIR_TWIG_RADIUS_TIP, up, q, mid);
+              }
             }
           }
         }
@@ -3184,40 +3228,6 @@ const h = new Float32Array(mapW * mapH);
 
       treeInstancesMesh.instanceMatrix.needsUpdate = true;
       levelRoot.add(treeInstancesMesh);
-
-      const sprigLocals = buildDouglasFirBranchSprigLocalMatrices();
-      if (!treeBranchSprigTemplateGeometry) {
-        treeBranchSprigTemplateGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
-        treeBranchSprigTemplateGeometry.translate(0, FIR_BRANCH_SPRIG_TOP_INTERSECT_PORTION - 0.5, 0);
-      }
-      if (!treeBranchSprigTemplateMaterial) {
-        treeBranchSprigTemplateMaterial = new THREE.MeshBasicMaterial({
-          map: getTreeBranchSprigTexture(),
-          transparent: true,
-          alphaTest: 0.3,
-          side: THREE.DoubleSide,
-          depthWrite: false
-        });
-      }
-
-      const sprigCount = blobs.length * sprigLocals.length;
-      treeBranchSprigInstancesMesh = new THREE.InstancedMesh(treeBranchSprigTemplateGeometry, treeBranchSprigTemplateMaterial, sprigCount);
-      treeBranchSprigInstancesMesh.castShadow = false;
-      treeBranchSprigInstancesMesh.receiveShadow = false;
-      treeBranchSprigInstancesMesh.frustumCulled = !IS_FIREFOX;
-
-      const sprigMatrix = new THREE.Matrix4();
-      let sprigIndex = 0;
-      for (let i = 0; i < blobs.length; i++) {
-        treeInstancesMesh.getMatrixAt(i, m);
-        for (let j = 0; j < sprigLocals.length; j++) {
-          sprigMatrix.multiplyMatrices(m, sprigLocals[j]);
-          treeBranchSprigInstancesMesh.setMatrixAt(sprigIndex, sprigMatrix);
-          sprigIndex++;
-        }
-      }
-      treeBranchSprigInstancesMesh.instanceMatrix.needsUpdate = true;
-      levelRoot.add(treeBranchSprigInstancesMesh);
     }
 
     /* =========================
@@ -3564,6 +3574,7 @@ const h = new Float32Array(mapW * mapH);
     }
 
     async function safeLoad(label, url, loaderFn) {
+      if (!url) return null;
       try {
         return await loaderFn(url);
       } catch (err) {
@@ -4389,8 +4400,26 @@ const h = new Float32Array(mapW * mapH);
     const sunDirWorld = new THREE.Vector3();
     const sunDirView = new THREE.Vector3();
     const clock = new THREE.Clock();
-    function animate() {
-      const dt = Math.min(clock.getDelta(), 0.10);
+    let lastRenderTime = 0;
+    let animationPaused = false;
+
+    document.addEventListener('visibilitychange', () => {
+      animationPaused = document.hidden;
+      if (!animationPaused) {
+        clock.getDelta();
+        lastRenderTime = performance.now();
+      }
+    });
+
+    function animate(now = 0) {
+      requestAnimationFrame(animate);
+      if (animationPaused) return;
+
+      const minFrameMs = 1000 / WORLD_DETAIL.targetFps;
+      if (now - lastRenderTime < minFrameMs) return;
+      lastRenderTime = now;
+
+      const dt = Math.min(clock.getDelta(), 0.05);
 
       // Animate sun from east to west in a 2-minute loop
       sunArcT = (sunArcT + dt) % SUN_ARC_DURATION_S;
@@ -4439,7 +4468,6 @@ const h = new Float32Array(mapW * mapH);
       updateHeroAndCamera(dt);
 
       renderer.render(scene, camera);
-      requestAnimationFrame(animate);
     }
     requestAnimationFrame(animate);
 
