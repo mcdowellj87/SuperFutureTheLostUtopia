@@ -22,7 +22,7 @@ WHORLS = 32
 # Trunk
 # -----------------------------------
 bpy.ops.mesh.primitive_cylinder_add(
-    vertices=16,
+    vertices=5,
     radius=1,
     depth=HEIGHT,
     location=(0,0,HEIGHT/2)

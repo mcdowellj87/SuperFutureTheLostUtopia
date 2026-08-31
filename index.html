@@ -1870,7 +1870,7 @@
     renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color('#3ad7ff');
+    scene.background = new THREE.Color('#3a2141');
     scene.fog = new THREE.Fog(0x2a0809, 8000, 30000);
 
     const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 60000);
@@ -1913,17 +1913,17 @@
     ========================= */
     scene.add(new THREE.AmbientLight(0xffffff, 0.08));
 
-    const sun  = new THREE.DirectionalLight(new THREE.Color(brightestHillColor), 3.1);
-    sun.position.set(-2200, 700, 200);
-    sun.target.position.set(0, 0, 0);
-    scene.add(sun);
-    scene.add(sun.target);
-
     const MOON_LIGHT_COLOR = 0xbfd6ff;
     const SUN_LIGHT_INTENSITY = 3.1;
     const MOON_LIGHT_INTENSITY = 0.28;
 
-    const fill = new THREE.DirectionalLight(new THREE.Color(brightestHillColor), 0.24);
+    const sun  = new THREE.DirectionalLight(new THREE.Color(MOON_LIGHT_COLOR), MOON_LIGHT_INTENSITY);
+    sun.position.set(-1600, 650, 520);
+    sun.target.position.set(0, 0, 0);
+    scene.add(sun);
+    scene.add(sun.target);
+
+    const fill = new THREE.DirectionalLight(new THREE.Color(MOON_LIGHT_COLOR), MOON_LIGHT_INTENSITY);
     fill.position.set(900, 1200, -600);
     fill.target.position.set(0, 0, 0);
     scene.add(fill);
@@ -1933,6 +1933,9 @@
     const SUN_ARC_RADIUS = 2200.0;
     const SUN_ARC_HEIGHT = 700.0;
     const SUN_ARC_Z = 200.0;
+    const MOON_X = -1600.0;
+    const MOON_Y = 650.0;
+    const MOON_Z = 520.0;
     let sunArcT = 0.0;
 
     /* Level root */
@@ -1976,7 +1979,7 @@
       skyCanvas.height = 256;
       skyCtx = skyCanvas.getContext('2d');
 
-      paintSkyGradient(1);
+      paintSkyGradient(0);
 
       skyTex = new THREE.CanvasTexture(skyCanvas);
       skyTex.colorSpace = THREE.SRGBColorSpace;
@@ -2007,9 +2010,9 @@
       const r = size * 0.5;
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
       g.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
-      g.addColorStop(0.6, 'rgba(255, 245, 220, 1.0)');
-      g.addColorStop(0.9, 'rgba(255, 228, 170, 0.9)');
-      g.addColorStop(1.0, 'rgba(255, 228, 170, 0.0)');
+      g.addColorStop(0.6, 'rgba(226, 235, 255, 1.0)');
+      g.addColorStop(0.9, 'rgba(178, 204, 255, 0.86)');
+      g.addColorStop(1.0, 'rgba(178, 204, 255, 0.0)');
 
       ctx.fillStyle = g;
       ctx.beginPath();
@@ -2033,10 +2036,10 @@
       const cy = size * 0.5;
       const r = size * 0.5;
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      g.addColorStop(0.0, 'rgba(255, 252, 240, 0.9)');
-      g.addColorStop(0.3, 'rgba(255, 232, 176, 0.55)');
-      g.addColorStop(0.6, 'rgba(255, 196, 106, 0.25)');
-      g.addColorStop(1.0, 'rgba(255, 176, 92, 0.0)');
+      g.addColorStop(0.0, 'rgba(232, 240, 255, 0.72)');
+      g.addColorStop(0.3, 'rgba(180, 204, 255, 0.38)');
+      g.addColorStop(0.6, 'rgba(112, 132, 214, 0.18)');
+      g.addColorStop(1.0, 'rgba(112, 132, 214, 0.0)');
 
       ctx.fillStyle = g;
       ctx.beginPath();
@@ -2723,6 +2726,8 @@ const h = new Float32Array(mapW * mapH);
     const FIR_HEIGHT = 42.0;
     const FIR_TRUNK_RADIUS_BASE = 0.6;
     const FIR_TRUNK_RADIUS_TOP = 0.06;
+    const FIR_TRUNK_RADIAL_SEGMENTS = 5;
+    const FIR_TRUNK_HEIGHT_SEGMENTS = 8;
     const FIR_BRANCH_START = 0.35;
     const FIR_WHORLS = 18;
     const FIR_BRANCH_SEGMENTS = 6;
@@ -2868,12 +2873,41 @@ const h = new Float32Array(mapW * mapH);
       parts.push(tube);
     }
 
+    function addFlatOffshoot(parts, a, dir, side, gravity, length, width) {
+      if (length <= 1e-4 || width <= 1e-4) return;
+
+      const root = a.clone();
+      const tip = a.clone().addScaledVector(dir, length);
+      const droopTip = tip.clone().addScaledVector(gravity, length * 0.18);
+      const sideWidth = Math.max(width, length * 0.035);
+
+      const baseLeft = root.clone().addScaledVector(side, sideWidth * 0.45);
+      const baseRight = root.clone().addScaledVector(side, -sideWidth * 0.45);
+      const mid = root.clone().lerp(droopTip, 0.58);
+      const midLeft = mid.clone().addScaledVector(side, sideWidth);
+      const midRight = mid.clone().addScaledVector(side, -sideWidth * 0.72);
+      const vertices = [baseLeft, baseRight, midLeft, midRight, droopTip];
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices.flatMap(v => [v.x, v.y, v.z]), 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute([
+        0.0, 0.0,
+        1.0, 0.0,
+        0.0, 0.58,
+        1.0, 0.58,
+        0.5, 1.0
+      ], 2));
+      geo.setIndex([0, 1, 2, 1, 3, 2, 2, 3, 4]);
+      geo.computeVertexNormals();
+      parts.push(geo);
+    }
+
     function buildDouglasFirTemplateGeometry() {
       if (treeTemplateGeometry) return treeTemplateGeometry;
 
       const parts = [];
 
-      const trunk = new THREE.CylinderGeometry(1, 1, FIR_HEIGHT, 8, 14, false);
+      const trunk = new THREE.CylinderGeometry(1, 1, FIR_HEIGHT, FIR_TRUNK_RADIAL_SEGMENTS, FIR_TRUNK_HEIGHT_SEGMENTS, false);
       const trunkPos = trunk.attributes.position;
       for (let i = 0; i < trunkPos.count; i++) {
         const x = trunkPos.getX(i);
@@ -2932,7 +2966,9 @@ const h = new Float32Array(mapW * mapH);
             for (let k = 0; k < FIR_BRANCH_SEGMENTS; k++) {
               a.copy(points[k]);
               b.copy(points[k + 1]);
-              addTubeBetween(parts, a, b, thickness, thickness, up, q, mid);
+              const radiusBase = thickness * Math.pow(1 - (k / FIR_BRANCH_SEGMENTS), 0.85);
+              const radiusTip = thickness * Math.pow(1 - ((k + 1) / FIR_BRANCH_SEGMENTS), 0.85);
+              addTubeBetween(parts, a, b, radiusBase, radiusTip, up, q, mid);
 
               const branchU = (k + 0.5) / FIR_BRANCH_SEGMENTS;
               if (branchU < FIR_TWIG_START_T) continue;
@@ -2952,7 +2988,7 @@ const h = new Float32Array(mapW * mapH);
                 .addScaledVector(gravity, 0.72)
                 .normalize();
               twigEnd.copy(twigStart).addScaledVector(twigDir, twigLen);
-              addTubeBetween(parts, twigStart, twigEnd, twigRadius, FIR_TWIG_RADIUS_TIP, up, q, mid);
+              addFlatOffshoot(parts, twigStart, twigDir, side, gravity, twigLen, twigRadius * 3.2);
 
               if (branchU < 0.78 && t < 0.92) {
                 twigStart.copy(a).lerp(b, 0.82);
@@ -2961,8 +2997,7 @@ const h = new Float32Array(mapW * mapH);
                   .addScaledVector(side, -sideSign * 0.42)
                   .addScaledVector(gravity, 0.82)
                   .normalize();
-                twigEnd.copy(twigStart).addScaledVector(twigDir, twigLen * 0.72);
-                addTubeBetween(parts, twigStart, twigEnd, twigRadius * 0.82, FIR_TWIG_RADIUS_TIP, up, q, mid);
+                addFlatOffshoot(parts, twigStart, twigDir, side, gravity, twigLen * 0.72, twigRadius * 2.6);
               }
             }
           }
@@ -4421,18 +4456,10 @@ const h = new Float32Array(mapW * mapH);
 
       const dt = Math.min(clock.getDelta(), 0.05);
 
-      // Animate sun from east to west in a 2-minute loop
-      sunArcT = (sunArcT + dt) % SUN_ARC_DURATION_S;
-      const sunPhase = sunArcT / SUN_ARC_DURATION_S;
-      const sunAng = sunPhase * Math.PI * 2.0;
-      sun.position.set(
-        Math.cos(sunAng) * SUN_ARC_RADIUS,
-        Math.sin(sunAng) * SUN_ARC_HEIGHT,
-        SUN_ARC_Z
-      );
-      sun.target.position.set(0, 0, 0);
-      sun.target.updateWorldMatrix(true, false);
-      updateHorizonSunPosition(14000);
+	      sun.position.set(MOON_X, MOON_Y, MOON_Z);
+	      sun.target.position.set(0, 0, 0);
+	      sun.target.updateWorldMatrix(true, false);
+	      updateHorizonSunPosition(14000);
 
       // Align all directional lighting to the sun axis
       fill.position.copy(sun.position);
@@ -4445,16 +4472,12 @@ const h = new Float32Array(mapW * mapH);
       for (const u of heroSunUniforms) u.value.copy(sunDirView);
       for (const u of fusionSunUniforms) u.value.copy(sunDirView);
 
-      // Day/night lighting: sun below horizon -> moonlight + mauve sky
-      const nightStartY = -220.0;
-      const dayStartY = 180.0;
-      const dayT = THREE.MathUtils.clamp((sun.position.y - nightStartY) / (dayStartY - nightStartY), 0, 1);
+	      sun.color.setHex(MOON_LIGHT_COLOR);
+	      sun.intensity = MOON_LIGHT_INTENSITY;
+	      fill.color.setHex(MOON_LIGHT_COLOR);
+	      fill.intensity = MOON_LIGHT_INTENSITY;
 
-      sun.intensity = SUN_LIGHT_INTENSITY * dayT;
-      fill.color.setHex(MOON_LIGHT_COLOR).lerp(new THREE.Color(brightestHillColor), dayT);
-      fill.intensity = THREE.MathUtils.lerp(MOON_LIGHT_INTENSITY, 0.24, dayT);
-
-      paintSkyGradient(dayT);
+	      paintSkyGradient(0);
 
       if (deathActive) {
         deathLockoutT = Math.max(0, deathLockoutT - dt);
@@ -4465,9 +4488,9 @@ const h = new Float32Array(mapW * mapH);
         }
       }
 
-      updateHeroAndCamera(dt);
+	      updateHeroAndCamera(dt);
 
-      renderer.render(scene, camera);
+	      renderer.render(scene, camera);
     }
     requestAnimationFrame(animate);
 
