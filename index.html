@@ -1353,9 +1353,11 @@
        FILES
     ========================= */
     const MAP_URL = './images/map.png';
-    const HERO_WALK_GLB = null;
-    const HERO_RUN_GLB = null;
-    const HERO_IDLE_GLB = null;
+    const PLAYER_WALK_GLB = './assets/mezza_walking.glb';
+    const PLAYER_RUN_GLB = './assets/mezza_running.glb';
+    const PLAYER_IDLE_GLB = './assets/mezza_idle.glb';
+    const MONSTER_IDLE_GLB = './assets/muffin_man/Animation_Idle_withSkin.glb';
+    const MONSTER_WALK_GLB = './assets/muffin_man/Animation_Walking_withSkin.glb';
     const FIR_BRANCH_SPRIG_URL = './images/branch.png';
 
     /* =========================
@@ -1460,7 +1462,7 @@
     const HEIGHT_CURVE_POW = 1.35; // lighter greens accelerate upward height gain
     const HEIGHT_LIGHT_TAPER = 0.25; // soft-rolls off the brightest greens
 
-    const PLAYER_SCALE = 25.0; // was 2.0 — hero is 10x smaller
+    const PLAYER_SCALE = 25.0; // was 2.0 — player model is 10x smaller
     const BASE_EYE_HEIGHT = 1.7;
     const PLAYER_EYE_HEIGHT = BASE_EYE_HEIGHT * PLAYER_SCALE;
 
@@ -1654,7 +1656,7 @@
       return tex;
     }
 
-    function makeHeroToonRamp() {
+    function makeCharacterToonRamp() {
       const c = document.createElement('canvas');
       c.width = 256; c.height = 1;
       const ctx = c.getContext('2d');
@@ -1675,14 +1677,14 @@
       return tex;
     }
 
-    const HERO_TOON_RAMP = makeHeroToonRamp();
+    const CHARACTER_TOON_RAMP = makeCharacterToonRamp();
 
-    const heroSunUniforms = new Set();
+    const characterSunUniforms = new Set();
 
-    function makeHeroToonPhongMaterial(baseColor) {
+    function makeCharacterToonPhongMaterial(baseColor) {
       const mat = new THREE.MeshToonMaterial({
         color: new THREE.Color(baseColor),
-        gradientMap: HERO_TOON_RAMP
+        gradientMap: CHARACTER_TOON_RAMP
       });
 
       mat.onBeforeCompile = (shader) => {
@@ -1694,7 +1696,7 @@
         shader.uniforms.uHiSpecAmt = { value: 1.25 };
         shader.uniforms.uSpecBands = { value: 3.0 };
         shader.uniforms.uSunDir = { value: new THREE.Vector3(0.55, 0.35, 0.75) };
-        heroSunUniforms.add(shader.uniforms.uSunDir);
+        characterSunUniforms.add(shader.uniforms.uSunDir);
 
         shader.fragmentShader = shader.fragmentShader.replace(
           '#include <common>',
@@ -2271,7 +2273,7 @@
 
       if (cmd === 'superflea') {
         // Ensure avatar exists even if ./assets/ is missing
-        ensureHeroReady();
+        ensurePlayerModelReady();
         VIEW_MODE = (VIEW_MODE === 'third') ? 'first' : 'third';
       }
       if (cmd === 'gettingold') {
@@ -2855,12 +2857,52 @@ const h = new Float32Array(mapW * mapH);
       return supported;
     }
 
+    const _treeCircleMin = new THREE.Vector3();
+    const _treeCircleMax = new THREE.Vector3();
+    function resolveTreeCircleCollisions(pos, radius) {
+      _treeCircleMin.set(pos.x - radius, pos.y - 2.0, pos.z - radius);
+      _treeCircleMax.set(pos.x + radius, pos.y + 4.0, pos.z + radius);
+      const ids = queryNearby(_treeCircleMin, _treeCircleMax);
+      let blocked = false;
+
+      for (const id of ids) {
+        const c = colliders[id];
+        if (!c || c.tag !== 'tree-trunk') continue;
+
+        const cx = c.a.x;
+        const cz = c.a.z;
+        const dx = pos.x - cx;
+        const dz = pos.z - cz;
+        const rr = radius + c.r;
+        const d2 = dx * dx + dz * dz;
+        if (d2 >= rr * rr) continue;
+
+        let nx = 1;
+        let nz = 0;
+        let d = 0;
+        if (d2 > 1e-8) {
+          d = Math.sqrt(d2);
+          nx = dx / d;
+          nz = dz / d;
+        }
+
+        const push = rr - d;
+        pos.x += nx * push;
+        pos.z += nz * push;
+        blocked = true;
+      }
+
+      return blocked;
+    }
+
     /* =========================
        TREES (PROCEDURAL DOUGLAS FIR)
     ========================= */
     const FIR_HEIGHT = 42.0;
     const FIR_TRUNK_RADIUS_BASE = 0.6;
     const FIR_TRUNK_RADIUS_TOP = 0.06;
+    const FIR_TRUNK_COLLIDER_RADIUS_MUL = 1.15;
+    const FIR_TRUNK_COLLIDER_HEIGHT_MUL = 0.82;
     const FIR_TRUNK_RADIAL_SEGMENTS = 5;
     const FIR_TRUNK_HEIGHT_SEGMENTS = 8;
     const FIR_BRANCH_START = 0.35;
@@ -2908,6 +2950,7 @@ const h = new Float32Array(mapW * mapH);
     const FIR_TWIG_LENGTH = 3.4;
     const FIR_TWIG_RADIUS_BASE = 0.055;
     const FIR_TWIG_RADIUS_TIP = 0.012;
+    const MONSTER_BODY_RADIUS = 1.65;
 
     let treeInstancesMesh = null;
     let treeTemplateGeometry = null;
@@ -3394,6 +3437,16 @@ const h = new Float32Array(mapW * mapH);
         s.set(scale * widthMul, scale * heightMul, scale * widthMul);
         m.compose(p, q, s);
         treeInstancesMesh.setMatrixAt(i, m);
+
+        const trunkRadius = FIR_TRUNK_RADIUS_BASE * scale * widthMul * FIR_TRUNK_COLLIDER_RADIUS_MUL;
+        const trunkHeight = FIR_HEIGHT * scale * heightMul * FIR_TRUNK_COLLIDER_HEIGHT_MUL;
+        colliders.push({
+          type: 'cap',
+          a: new THREE.Vector3(wx, baseY + trunkRadius, wz),
+          b: new THREE.Vector3(wx, baseY + trunkHeight, wz),
+          r: trunkRadius,
+          tag: 'tree-trunk'
+        });
       }
 
       treeInstancesMesh.instanceMatrix.needsUpdate = true;
@@ -3757,16 +3810,16 @@ const h = new Float32Array(mapW * mapH);
       }
     }
 
-    // Player-ish sized black prism stand-in
-    const HERO_FALLBACK_SCALE = 0.03;
+    // Player-sized black prism stand-in
+    const PLAYER_MODEL_FALLBACK_SCALE = 0.03;
 
-    function makeFallbackHeroPrism() {
+    function makeFallbackPlayerPrism() {
       const bodyH = (PLAYER_CAPSULE_H + (PLAYER_RADIUS * 2.0));
       const bodyW = (PLAYER_RADIUS * 2.0) * 1.05;
       const bodyD = (PLAYER_RADIUS * 2.0) * 0.85;
 
       const geo = new THREE.BoxGeometry(bodyW, bodyH, bodyD);
-      const mat = makeHeroToonPhongMaterial(0x000000);
+      const mat = makeCharacterToonPhongMaterial(0x000000);
 
       const mesh = new THREE.Mesh(geo, mat);
       mesh.castShadow = false;
@@ -3775,166 +3828,288 @@ const h = new Float32Array(mapW * mapH);
 
       const g = new THREE.Group();
       g.add(mesh);
-      g.scale.setScalar(HERO_FALLBACK_SCALE);
+      g.scale.setScalar(PLAYER_MODEL_FALLBACK_SCALE);
       return g;
     }
 
-    let heroFallbackBuilt = false;
-    function ensureHeroReady() {
-      if (heroWalk || heroRun || heroIdle || heroFallbackBuilt) return;
+    let playerFallbackBuilt = false;
+    function ensurePlayerModelReady() {
+      if (playerWalk || playerRun || playerIdle || playerFallbackBuilt) return;
 
-      heroIdle = makeFallbackHeroPrism();
-      heroWalk = makeFallbackHeroPrism();
-      heroRun = makeFallbackHeroPrism();
+      playerIdle = makeFallbackPlayerPrism();
+      playerWalk = makeFallbackPlayerPrism();
+      playerRun = makeFallbackPlayerPrism();
 
       // Default state: idle
-      heroIdle.visible = true;
-      heroWalk.visible = false;
-      heroRun.visible = false;
+      playerIdle.visible = true;
+      playerWalk.visible = false;
+      playerRun.visible = false;
 
-      heroRoot.add(heroIdle);
-      heroRoot.add(heroWalk);
-      heroRoot.add(heroRun);
+      playerRoot.add(playerIdle);
+      playerRoot.add(playerWalk);
+      playerRoot.add(playerRun);
 
-      heroIdleMixer = null;
-      heroWalkMixer = null;
-      heroRunMixer = null;
-      heroIdleAction = null;
-      heroWalkAction = null;
-      heroRunAction = null;
+      playerIdleMixer = null;
+      playerWalkMixer = null;
+      playerRunMixer = null;
+      playerIdleAction = null;
+      playerWalkAction = null;
+      playerRunAction = null;
 
-      heroFallbackBuilt = true;
+      playerFallbackBuilt = true;
     }
 
     /* =========================
-       HERO (3rd PERSON CHARACTER)
+       PLAYER AND MONSTER MODELS
     ========================= */
-    const heroRoot = new THREE.Group();
-    scene.add(heroRoot);
+    const playerRoot = new THREE.Group();
+    scene.add(playerRoot);
 
-    let heroWalk = null;
-    let heroRun = null;
-    let heroIdle = null;
-    let heroWalkMixer = null;
-    let heroRunMixer = null;
-    let heroIdleMixer = null;
-    let heroWalkAction = null;
-    let heroRunAction = null;
-    let heroIdleAction = null;
+    let playerWalk = null;
+    let playerRun = null;
+    let playerIdle = null;
+    let playerWalkMixer = null;
+    let playerRunMixer = null;
+    let playerIdleMixer = null;
+    let playerWalkAction = null;
+    let playerRunAction = null;
+    let playerIdleAction = null;
 
     const loader = new GLTFLoader();
 
-    function applyHeroShading(root) {
+    const monsterRoot = new THREE.Group();
+    scene.add(monsterRoot);
+    let monsterIdle = null;
+    let monsterWalk = null;
+    let monsterIdleMixer = null;
+    let monsterWalkMixer = null;
+    let monsterIdleAction = null;
+    let monsterWalkAction = null;
+    let monsterLoaded = false;
+    const monsterTarget = new THREE.Vector3();
+    const monsterDir = new THREE.Vector3();
+    let monsterPickTimer = 0;
+    let monsterRandState = 0x51f15e;
+
+    function monsterRand() {
+      monsterRandState += 0x6D2B79F5;
+      let x = Math.imul(monsterRandState ^ (monsterRandState >>> 15), 1 | monsterRandState);
+      x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    }
+
+    function applyCharacterShading(root) {
       if (!root) return;
       root.traverse(o => {
         if (!o.isMesh) return;
         const base = (o.material && o.material.color && o.material.color.isColor)
           ? o.material.color.clone()
           : new THREE.Color(0xffffff);
-        const mat = makeHeroToonPhongMaterial(base);
+        const mat = makeCharacterToonPhongMaterial(base);
         if (o.isSkinnedMesh) mat.skinning = true;
         mat.needsUpdate = true;
         o.material = mat;
       });
     }
 
-    async function loadHero() {
+    async function loadPlayerModel() {
       // Idle (when not moving)
-      const gltfIdle = await safeLoad('hero idle GLB', HERO_IDLE_GLB, (u) => loader.loadAsync(u));
+      const gltfIdle = await safeLoad('player idle GLB', PLAYER_IDLE_GLB, (u) => loader.loadAsync(u));
       if (gltfIdle && gltfIdle.scene) {
-        heroIdle = gltfIdle.scene;
-        applyHeroShading(heroIdle);
-        heroIdle.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        playerIdle = gltfIdle.scene;
+        applyCharacterShading(playerIdle);
+        playerIdle.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
         // Default state is idle
-        heroIdle.visible = true;
-        heroRoot.add(heroIdle);
+        playerIdle.visible = true;
+        playerRoot.add(playerIdle);
 
-        heroIdleMixer = new THREE.AnimationMixer(heroIdle);
+        playerIdleMixer = new THREE.AnimationMixer(playerIdle);
         if (gltfIdle.animations && gltfIdle.animations.length) {
-          heroIdleAction = heroIdleMixer.clipAction(gltfIdle.animations[0]);
-          heroIdleAction.play();
+          playerIdleAction = playerIdleMixer.clipAction(gltfIdle.animations[0]);
+          playerIdleAction.play();
         }
       } else {
-        // If idle GLB fails, we'll fall back to walk-as-idle via setHeroMode()
-        heroIdle = null;
-        heroIdleMixer = null;
-        heroIdleAction = null;
+        // If idle GLB fails, we'll fall back to walk-as-idle via setPlayerModelMode()
+        playerIdle = null;
+        playerIdleMixer = null;
+        playerIdleAction = null;
       }
 
       // Walking
-      const gltfWalk = await safeLoad('hero walk GLB', HERO_WALK_GLB, (u) => loader.loadAsync(u));
+      const gltfWalk = await safeLoad('player walk GLB', PLAYER_WALK_GLB, (u) => loader.loadAsync(u));
       if (gltfWalk && gltfWalk.scene) {
-        heroWalk = gltfWalk.scene;
-        applyHeroShading(heroWalk);
-        heroWalk.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        playerWalk = gltfWalk.scene;
+        applyCharacterShading(playerWalk);
+        playerWalk.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
         // Start hidden until we actually move (or until idle is missing)
-        heroWalk.visible = !heroIdle;
-        heroRoot.add(heroWalk);
+        playerWalk.visible = !playerIdle;
+        playerRoot.add(playerWalk);
 
-        heroWalkMixer = new THREE.AnimationMixer(heroWalk);
+        playerWalkMixer = new THREE.AnimationMixer(playerWalk);
         if (gltfWalk.animations && gltfWalk.animations.length) {
-          heroWalkAction = heroWalkMixer.clipAction(gltfWalk.animations[0]);
-          heroWalkAction.play();
+          playerWalkAction = playerWalkMixer.clipAction(gltfWalk.animations[0]);
+          playerWalkAction.play();
         }
       } else {
-        heroWalk = makeFallbackHeroPrism();
+        playerWalk = makeFallbackPlayerPrism();
         // If idle exists, keep walk hidden by default
-        heroWalk.visible = !heroIdle;
-        heroRoot.add(heroWalk);
-        heroWalkMixer = null;
-        heroWalkAction = null;
+        playerWalk.visible = !playerIdle;
+        playerRoot.add(playerWalk);
+        playerWalkMixer = null;
+        playerWalkAction = null;
       }
 
       // Running
-      const gltfRun = await safeLoad('hero run GLB', HERO_RUN_GLB, (u) => loader.loadAsync(u));
+      const gltfRun = await safeLoad('player run GLB', PLAYER_RUN_GLB, (u) => loader.loadAsync(u));
       if (gltfRun && gltfRun.scene) {
-        heroRun = gltfRun.scene;
-        applyHeroShading(heroRun);
-        heroRun.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
-        heroRun.visible = false;
-        heroRoot.add(heroRun);
+        playerRun = gltfRun.scene;
+        applyCharacterShading(playerRun);
+        playerRun.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        playerRun.visible = false;
+        playerRoot.add(playerRun);
 
-        heroRunMixer = new THREE.AnimationMixer(heroRun);
+        playerRunMixer = new THREE.AnimationMixer(playerRun);
         if (gltfRun.animations && gltfRun.animations.length) {
-          heroRunAction = heroRunMixer.clipAction(gltfRun.animations[0]);
-          heroRunAction.play();
+          playerRunAction = playerRunMixer.clipAction(gltfRun.animations[0]);
+          playerRunAction.play();
         }
       } else {
-        heroRun = makeFallbackHeroPrism();
-        heroRun.visible = false;
-        heroRoot.add(heroRun);
-        heroRunMixer = null;
-        heroRunAction = null;
+        playerRun = makeFallbackPlayerPrism();
+        playerRun.visible = false;
+        playerRoot.add(playerRun);
+        playerRunMixer = null;
+        playerRunAction = null;
       }
     }
 
-    function setHeroMode(isRunning, moving) {
-      ensureHeroReady();
-      if (!heroWalk || !heroRun) return;
+    function placeMonsterNextToPlayer() {
+      const x = THREE.MathUtils.clamp(playerPos.x + 5.5, -halfW + 1, halfW - 1);
+      const z = THREE.MathUtils.clamp(playerPos.z + 4.0, -halfH + 1, halfH - 1);
+      const y = Math.max(heightAtWorld(x, z), SEA_LEVEL);
+      monsterRoot.position.set(x, y, z);
+      monsterRoot.rotation.set(0, yaw + Math.PI * 0.25, 0);
+      monsterTarget.copy(monsterRoot.position);
+      monsterPickTimer = 0.25;
+    }
+
+    function pickMonsterTarget() {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const angle = monsterRand() * Math.PI * 2;
+        const radius = THREE.MathUtils.lerp(7.0, 26.0, monsterRand());
+        const x = THREE.MathUtils.clamp(playerPos.x + Math.cos(angle) * radius, -halfW + 1, halfW - 1);
+        const z = THREE.MathUtils.clamp(playerPos.z + Math.sin(angle) * radius, -halfH + 1, halfH - 1);
+        if (!isWaterAtWorld(x, z)) {
+          monsterTarget.set(x, Math.max(heightAtWorld(x, z), SEA_LEVEL), z);
+          monsterPickTimer = THREE.MathUtils.lerp(3.0, 7.0, monsterRand());
+          return;
+        }
+      }
+      monsterTarget.copy(monsterRoot.position);
+      monsterPickTimer = 2.0;
+    }
+
+    function setMonsterWalking(walking) {
+      if (monsterIdle) monsterIdle.visible = !walking;
+      if (monsterWalk) monsterWalk.visible = walking;
+    }
+
+    async function loadMonsterModel() {
+      if (monsterLoaded) return;
+      monsterLoaded = true;
+
+      const gltfIdle = await safeLoad('monster idle GLB', MONSTER_IDLE_GLB, (u) => loader.loadAsync(u));
+      if (gltfIdle && gltfIdle.scene) {
+        monsterIdle = gltfIdle.scene;
+        applyCharacterShading(monsterIdle);
+        monsterIdle.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        monsterIdle.visible = false;
+        monsterRoot.add(monsterIdle);
+        monsterIdleMixer = new THREE.AnimationMixer(monsterIdle);
+        if (gltfIdle.animations && gltfIdle.animations.length) {
+          monsterIdleAction = monsterIdleMixer.clipAction(gltfIdle.animations[0]);
+          monsterIdleAction.play();
+        }
+      }
+
+      const gltfWalk = await safeLoad('monster walking GLB', MONSTER_WALK_GLB, (u) => loader.loadAsync(u));
+      if (gltfWalk && gltfWalk.scene) {
+        monsterWalk = gltfWalk.scene;
+        applyCharacterShading(monsterWalk);
+        monsterWalk.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+        monsterWalk.visible = true;
+        monsterRoot.add(monsterWalk);
+        monsterWalkMixer = new THREE.AnimationMixer(monsterWalk);
+        if (gltfWalk.animations && gltfWalk.animations.length) {
+          monsterWalkAction = monsterWalkMixer.clipAction(gltfWalk.animations[0]);
+          monsterWalkAction.play();
+        }
+      }
+
+      monsterRoot.visible = !!(monsterIdle || monsterWalk);
+      placeMonsterNextToPlayer();
+      pickMonsterTarget();
+    }
+
+    function updateMonster(dt) {
+      if (!monsterRoot.visible) return;
+
+      monsterPickTimer -= dt;
+      const dx = monsterTarget.x - monsterRoot.position.x;
+      const dz = monsterTarget.z - monsterRoot.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.35 || monsterPickTimer <= 0) pickMonsterTarget();
+
+      const tx = monsterTarget.x - monsterRoot.position.x;
+      const tz = monsterTarget.z - monsterRoot.position.z;
+      const d = Math.hypot(tx, tz);
+      const walking = d > 0.45;
+      setMonsterWalking(walking);
+
+      if (walking) {
+        monsterDir.set(tx / d, 0, tz / d);
+        const step = Math.min(d, 2.4 * dt);
+        monsterRoot.position.x += monsterDir.x * step;
+        monsterRoot.position.z += monsterDir.z * step;
+        if (resolveTreeCircleCollisions(monsterRoot.position, MONSTER_BODY_RADIUS)) {
+          monsterPickTimer = Math.min(monsterPickTimer, 0.35);
+        }
+        monsterRoot.position.x = THREE.MathUtils.clamp(monsterRoot.position.x, -halfW + 1, halfW - 1);
+        monsterRoot.position.z = THREE.MathUtils.clamp(monsterRoot.position.z, -halfH + 1, halfH - 1);
+        monsterRoot.position.y = Math.max(heightAtWorld(monsterRoot.position.x, monsterRoot.position.z), SEA_LEVEL);
+        monsterRoot.rotation.y = Math.atan2(monsterDir.x, monsterDir.z);
+      }
+
+      if (monsterIdleMixer && monsterIdle && monsterIdle.visible) monsterIdleMixer.update(dt);
+      if (monsterWalkMixer && monsterWalk && monsterWalk.visible) monsterWalkMixer.update(dt);
+    }
+
+    function setPlayerModelMode(isRunning, moving) {
+      ensurePlayerModelReady();
+      if (!playerWalk || !playerRun) return;
 
       // If we don't have a dedicated idle model, use walk as idle for now.
-      const hasIdle = !!heroIdle;
+      const hasIdle = !!playerIdle;
 
       if (!moving) {
         if (hasIdle) {
-          heroIdle.visible = true;
-          heroWalk.visible = false;
-          heroRun.visible = false;
+          playerIdle.visible = true;
+          playerWalk.visible = false;
+          playerRun.visible = false;
         } else {
-          heroWalk.visible = true;
-          heroRun.visible = false;
+          playerWalk.visible = true;
+          playerRun.visible = false;
         }
         return;
       }
 
       // Moving
-      if (hasIdle) heroIdle.visible = false;
-      heroWalk.visible = !isRunning;
-      heroRun.visible = isRunning;
+      if (hasIdle) playerIdle.visible = false;
+      playerWalk.visible = !isRunning;
+      playerRun.visible = isRunning;
     }
 
-    function setHeroVisible(vis) {
-      heroRoot.visible = vis;
+    function setPlayerModelVisible(vis) {
+      playerRoot.visible = vis;
     }
 
     /* =========================
@@ -4185,7 +4360,8 @@ const h = new Float32Array(mapW * mapH);
       })();
 
       await loadLevel();
-      await loadHero();
+      await loadPlayerModel();
+      await loadMonsterModel();
 
       // IMPORTANT: don’t say “ready” until the cutscene assets are hot too
       if (prewarmPromise) await prewarmPromise;
@@ -4429,9 +4605,9 @@ const h = new Float32Array(mapW * mapH);
     const desiredCam = new THREE.Vector3();
     const tmpRayDir = new THREE.Vector3();
 
-    function updateHeroAndCamera(dt) {
+    function updatePlayerModelAndCamera(dt) {
       // Always guarantee avatar exists (even if assets fail, or toggled later)
-      ensureHeroReady();
+      ensurePlayerModelReady();
 
       applyCameraRotation();
 
@@ -4439,29 +4615,29 @@ const h = new Float32Array(mapW * mapH);
       const moving = (keys.has('KeyW') || keys.has('KeyA') || keys.has('KeyS') || keys.has('KeyD'));
 
       // Switch models: walking GLB for idle+walk, running GLB for sprint+move
-      setHeroMode(sprint && moving, moving);
+      setPlayerModelMode(sprint && moving, moving);
 
-      // hero follows the capsule feet so jump is visible (not locked to terrain height)
+      // player model follows the capsule feet so jump is visible (not locked to terrain height)
       const footY = playerPos.y - PLAYER_EYE_HEIGHT;
-      heroRoot.position.set(playerPos.x, footY, playerPos.z);
+      playerRoot.position.set(playerPos.x, footY, playerPos.z);
 
-      // Rotate hero to face movement direction when moving,
+      // Rotate player model to face movement direction when moving,
       // otherwise face camera yaw (so you can pose/aim).
       if (moving) {
         // direction from wish vector (already normalized)
         const ang = Math.atan2(wish.x, wish.z);
-        heroRoot.rotation.set(0, ang, 0);
+        playerRoot.rotation.set(0, ang, 0);
       } else {
-        heroRoot.rotation.set(0, yaw, 0);
+        playerRoot.rotation.set(0, yaw, 0);
       }
 
-      // hero visibility: hide in first-person so she doesn't block view
-      setHeroVisible(VIEW_MODE === 'third');
+      // player model visibility: hide in first-person so she doesn't block view
+      setPlayerModelVisible(VIEW_MODE === 'third');
 
       // Update mixers (safe even when null)
-      if (heroIdleMixer && heroIdle && heroIdle.visible) heroIdleMixer.update(dt);
-      if (heroWalkMixer && heroWalk && heroWalk.visible) heroWalkMixer.update(dt);
-      if (heroRunMixer && heroRun && heroRun.visible) heroRunMixer.update(dt);
+      if (playerIdleMixer && playerIdle && playerIdle.visible) playerIdleMixer.update(dt);
+      if (playerWalkMixer && playerWalk && playerWalk.visible) playerWalkMixer.update(dt);
+      if (playerRunMixer && playerRun && playerRun.visible) playerRunMixer.update(dt);
 
       if (VIEW_MODE === 'first') {
         // First-person camera at player eye
@@ -4529,10 +4705,10 @@ const h = new Float32Array(mapW * mapH);
       fill.target.position.set(0, 0, 0);
       fill.target.updateWorldMatrix(true, false);
 
-      // Keep hero specular aligned with the actual sun direction
+      // Keep character specular aligned with the actual sun direction
       sunDirWorld.copy(sun.position).normalize();
       sunDirView.copy(sunDirWorld).transformDirection(camera.matrixWorldInverse);
-      for (const u of heroSunUniforms) u.value.copy(sunDirView);
+      for (const u of characterSunUniforms) u.value.copy(sunDirView);
 
 	      sun.color.setHex(MOON_LIGHT_COLOR);
 	      sun.intensity = MOON_LIGHT_INTENSITY;
@@ -4550,7 +4726,8 @@ const h = new Float32Array(mapW * mapH);
         }
       }
 
-	      updateHeroAndCamera(dt);
+	      updatePlayerModelAndCamera(dt);
+	      updateMonster(dt);
 
 	      renderer.render(scene, camera);
     }
@@ -4559,7 +4736,10 @@ const h = new Float32Array(mapW * mapH);
     window.__mfResetWorld = async () => {
       // If you want a “true reload”, you’re already doing the expensive rebuild here:
       await loadLevel();
-      await loadHero();
+      await loadPlayerModel();
+      await loadMonsterModel();
+      placeMonsterNextToPlayer();
+      pickMonsterTarget();
 
       // If your world has any other runtime state to reset, do it here
       vel.set(0, 0, 0);

@@ -15,8 +15,13 @@ async function copyDirIfPresent(from, to) {
 
 await copyDirIfPresent(join(root, 'images'), join(dist, 'images'));
 await copyDirIfPresent(join(root, 'audio'), join(dist, 'audio'));
+await copyDirIfPresent(join(root, 'assets'), join(dist, 'assets'));
 await rm(join(dist, 'images', '.DS_Store'), { force: true });
 await rm(join(dist, 'images', 'map.xcf'), { force: true });
+await rm(join(dist, 'assets', 'mezza_idle.glb'), { force: true });
+await rm(join(dist, 'assets', 'mezza_walking.glb'), { force: true });
+await rm(join(dist, 'assets', 'mezza_running.glb'), { force: true });
+await rm(join(dist, 'assets', 'muffin_man'), { recursive: true, force: true });
 
 await mkdir(join(dist, 'server'), { recursive: true });
 await writeFile(join(dist, 'server', 'index.js'), `

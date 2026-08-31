@@ -2,6 +2,10 @@
 assets/*
 !assets/FusionReactor.glb
 !assets/douglas_fir.py
+assets/mezza_idle.glb
+assets/mezza_walking.glb
+assets/mezza_running.glb
+assets/muffin_man/
 
 .DS_Store
 Thumbs.db
@@ -18,4 +22,8 @@ mezzabeginning.html
 
 node_modules/
 dist/
+dist/assets/mezza_idle.glb
+dist/assets/mezza_walking.glb
+dist/assets/mezza_running.glb
+dist/assets/muffin_man/
 !images/mezza_beginning.png
