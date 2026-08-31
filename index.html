@@ -1356,8 +1356,6 @@
     const HERO_WALK_GLB = null;
     const HERO_RUN_GLB = null;
     const HERO_IDLE_GLB = null;
-    const FUSION_REACTOR_GLB = 'https://media.githubusercontent.com/media/mcdowellj87/SuperFutureTheLostUtopia/main/assets/FusionReactor.glb';
-    const FUSION_REACTOR_GLB_FALLBACK = FUSION_REACTOR_GLB;
     const FIR_BRANCH_SPRIG_URL = './images/branch.png';
 
     /* =========================
@@ -1680,7 +1678,6 @@
     const HERO_TOON_RAMP = makeHeroToonRamp();
 
     const heroSunUniforms = new Set();
-    const fusionSunUniforms = new Set();
 
     function makeHeroToonPhongMaterial(baseColor) {
       const mat = new THREE.MeshToonMaterial({
@@ -1742,95 +1739,6 @@
           spec *= smoothstep(0.05, 0.4, ndl);
 
           outColor += vec3(spec);
-
-          gl_FragColor = vec4( outColor, diffuseColor.a );
-
-          #ifdef TONE_MAPPING
-            gl_FragColor.rgb = toneMapping( gl_FragColor.rgb );
-          #endif
-          gl_FragColor = linearToOutputTexel( gl_FragColor );
-          `
-        );
-      };
-
-      return mat;
-    }
-
-    function makeFusionReactorMetalMaterial(sourceMat) {
-      const baseColor = sourceMat?.color?.isColor ? sourceMat.color.clone() : new THREE.Color(0x8a93a8);
-      const emissive = sourceMat?.emissive?.isColor ? sourceMat.emissive.clone() : new THREE.Color(0x000000);
-      const mat = new THREE.MeshToonMaterial({
-        color: baseColor,
-        map: sourceMat?.map || null,
-        emissive,
-        emissiveMap: sourceMat?.emissiveMap || null,
-        gradientMap: HERO_TOON_RAMP,
-        transparent: !!sourceMat?.transparent,
-        opacity: sourceMat?.opacity ?? 1.0,
-        side: sourceMat?.side ?? THREE.FrontSide,
-        alphaTest: sourceMat?.alphaTest ?? 0.0,
-        depthTest: sourceMat?.depthTest ?? true,
-        depthWrite: sourceMat?.depthWrite ?? true,
-        fog: true
-      });
-
-      mat.onBeforeCompile = (shader) => {
-        shader.uniforms.uBaseBright = { value: 1.10 };
-        shader.uniforms.uMidSpecPow = { value: 22.0 };
-        shader.uniforms.uHiSpecPow = { value: 55.0 };
-        shader.uniforms.uMidSpecAmt = { value: 0.40 };
-        shader.uniforms.uHiSpecAmt = { value: 0.75 };
-        shader.uniforms.uSpecBands = { value: 3.0 };
-        shader.uniforms.uSpecEnergy = { value: 0.92 };
-        shader.uniforms.uSpecSoft = { value: 0.28 };
-        shader.uniforms.uSpecMax = { value: 0.90 };
-        shader.uniforms.uSpecTint = { value: new THREE.Color('#b7d5ff') };
-        shader.uniforms.uSunDir = { value: new THREE.Vector3(0.55, 0.35, 0.75) };
-        fusionSunUniforms.add(shader.uniforms.uSunDir);
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <common>',
-          `#include <common>
-           uniform float uBaseBright;
-           uniform float uMidSpecPow;
-           uniform float uHiSpecPow;
-           uniform float uMidSpecAmt;
-           uniform float uHiSpecAmt;
-           uniform float uSpecBands;
-           uniform float uSpecEnergy;
-           uniform float uSpecSoft;
-           uniform float uSpecMax;
-           uniform vec3  uSpecTint;
-           uniform vec3  uSunDir;
-          `
-        );
-
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <output_fragment>',
-          `
-          vec3 outColor = outgoingLight;
-          outColor *= uBaseBright;
-
-          vec3 N = normalize( normal );
-          vec3 V = normalize( -vViewPosition );
-          vec3 L = normalize(uSunDir);
-          vec3 H = normalize(L + V);
-          float ndh = max(dot(N, H), 0.0);
-
-          float midSpec = pow(ndh, uMidSpecPow) * uMidSpecAmt;
-          float hiSpec  = pow(ndh, uHiSpecPow)  * uHiSpecAmt;
-          float spec = clamp(midSpec + hiSpec, 0.0, 1.0);
-
-          float bands = max(uSpecBands, 1.0);
-          spec = floor(spec * bands) / bands;
-
-          float ndl = max(dot(N, L), 0.0);
-          spec *= smoothstep(0.08, 0.55, ndl);
-          spec = mix(spec, smoothstep(0.0, 1.0, spec), uSpecSoft);
-          spec *= uSpecEnergy;
-          spec = min(spec, uSpecMax);
-
-          outColor += (uSpecTint * spec);
 
           gl_FragColor = vec4( outColor, diffuseColor.a );
 
@@ -2093,6 +2001,233 @@
       if (horizonSunGlow) horizonSunGlow.position.copy(pos);
     }
     makeHorizonSun();
+
+    function makeStarSpriteTexture() {
+      const size = 32;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      const cx = size * 0.5;
+      const cy = size * 0.5;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.5);
+      g.addColorStop(0.0, 'rgba(255, 255, 255, 1.0)');
+      g.addColorStop(0.16, 'rgba(255, 255, 255, 1.0)');
+      g.addColorStop(0.36, 'rgba(255, 255, 255, 0.42)');
+      g.addColorStop(1.0, 'rgba(255, 255, 255, 0.0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    function makeSkyStars() {
+      const rand = seededCloudNoise(13371337);
+      const starCount = 4200;
+      const starRadius = SKY_RADIUS * 0.94;
+      const positions = new Float32Array(starCount * 3);
+      const colors = new Float32Array(starCount * 3);
+      const sizes = new Float32Array(starCount);
+      const alphas = new Float32Array(starCount);
+
+      for (let i = 0; i < starCount; i++) {
+        const theta = rand() * Math.PI * 2;
+        const yNorm = THREE.MathUtils.lerp(-0.04, 0.96, Math.pow(rand(), 0.62));
+        const ringRadius = Math.sqrt(Math.max(0, 1 - yNorm * yNorm));
+        positions[i * 3] = Math.cos(theta) * ringRadius * starRadius;
+        positions[i * 3 + 1] = yNorm * starRadius;
+        positions[i * 3 + 2] = Math.sin(theta) * ringRadius * starRadius;
+
+        const intensity = Math.pow(rand(), 1.8);
+        const alpha = THREE.MathUtils.lerp(0.22, 1.0, intensity);
+        const warmth = rand();
+        colors[i * 3] = THREE.MathUtils.lerp(0.78, 1.0, warmth);
+        colors[i * 3 + 1] = THREE.MathUtils.lerp(0.84, 1.0, intensity);
+        colors[i * 3 + 2] = 1.0;
+        alphas[i] = alpha;
+        sizes[i] = THREE.MathUtils.lerp(5.0, 22.0, Math.pow(rand(), 3.6));
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute('starColor', new THREE.BufferAttribute(colors, 3));
+      geo.setAttribute('starSize', new THREE.BufferAttribute(sizes, 1));
+      geo.setAttribute('starAlpha', new THREE.BufferAttribute(alphas, 1));
+
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { uStarTexture: { value: makeStarSpriteTexture() } },
+        vertexShader: `
+          attribute vec3 starColor;
+          attribute float starSize;
+          attribute float starAlpha;
+          varying vec3 vStarColor;
+          varying float vStarAlpha;
+          void main() {
+            vStarColor = starColor;
+            vStarAlpha = starAlpha;
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+            gl_PointSize = starSize;
+          }
+        `,
+        fragmentShader: `
+          uniform sampler2D uStarTexture;
+          varying vec3 vStarColor;
+          varying float vStarAlpha;
+          void main() {
+            vec4 tex = texture2D(uStarTexture, gl_PointCoord);
+            gl_FragColor = vec4(vStarColor, tex.a * vStarAlpha);
+          }
+        `,
+        transparent: true,
+        depthTest: true,
+        depthWrite: false,
+        fog: false,
+        blending: THREE.AdditiveBlending
+      });
+
+      const stars = new THREE.Points(geo, mat);
+      stars.renderOrder = 0;
+      scene.add(stars);
+    }
+    makeSkyStars();
+
+    function seededCloudNoise(seed) {
+      let t = seed >>> 0;
+      return function rand() {
+        t += 0x6D2B79F5;
+        let x = Math.imul(t ^ (t >>> 15), 1 | t);
+        x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function makeWispyCloudRingGeometry(y, radius, thickness, opacity, seed) {
+      const rand = seededCloudNoise(seed);
+      const positions = [];
+      const colors = [];
+      const indices = [];
+      let vi = 0;
+      const segments = 192;
+      const verticalSegments = 10;
+      const phaseA = rand() * Math.PI * 2;
+      const phaseB = rand() * Math.PI * 2;
+      const active = [];
+
+      for (let i = 0; i < segments; i++) {
+        const a0 = (i / segments) * Math.PI * 2;
+        const wisp =
+          0.58 +
+          0.28 * Math.sin(a0 * 5.0 + phaseA) +
+          0.18 * Math.sin(a0 * 13.0 + phaseB) +
+          (rand() - 0.5) * 0.22;
+        active.push(wisp >= 0.48 && rand() >= 0.18 ? THREE.MathUtils.clamp(wisp, 0.35, 1.15) : 0);
+      }
+
+      let i = 0;
+      while (i < segments) {
+        while (i < segments && active[i] <= 0) i++;
+        const start = i;
+        while (i < segments && active[i] > 0) i++;
+        const end = i;
+        const run = end - start;
+        if (run <= 0) continue;
+
+        const taperIn = Math.max(1.2, Math.min(run * 0.48, 2.0 + rand() * 9.0));
+        const taperOut = Math.max(1.2, Math.min(run * 0.48, 2.0 + rand() * 9.0));
+        const taperPowerIn = THREE.MathUtils.lerp(1.15, 3.4, rand());
+        const taperPowerOut = THREE.MathUtils.lerp(1.15, 3.4, rand());
+        const yDrift = (rand() - 0.5) * thickness * 0.08;
+        const radialDrift = (rand() - 0.5) * thickness * 0.10;
+
+        for (let s = start; s < end; s++) {
+          const along0 = s - start;
+          const along1 = s + 1 - start;
+          const edgeFade0 = Math.min(1, along0 / taperIn, (run - along0) / taperOut);
+          const edgeFade1 = Math.min(1, along1 / taperIn, (run - along1) / taperOut);
+          const taperExp0 = along0 < run * 0.5 ? taperPowerIn : taperPowerOut;
+          const taperExp1 = along1 < run * 0.5 ? taperPowerIn : taperPowerOut;
+          const taper0 = Math.pow(Math.sin(THREE.MathUtils.clamp(edgeFade0, 0, 1) * Math.PI * 0.5), taperExp0);
+          const taper1 = Math.pow(Math.sin(THREE.MathUtils.clamp(edgeFade1, 0, 1) * Math.PI * 0.5), taperExp1);
+          const a0 = (s / segments) * Math.PI * 2;
+          const a1 = ((s + 1) / segments) * Math.PI * 2;
+          const bandAlpha0 = active[s] * taper0;
+          const bandAlpha1 = active[s] * taper1;
+
+          for (let j = 0; j < verticalSegments; j++) {
+            const v0 = j / verticalSegments;
+            const v1 = (j + 1) / verticalSegments;
+            const centerFalloff0 = Math.sin(v0 * Math.PI);
+            const centerFalloff1 = Math.sin(v1 * Math.PI);
+            const widthMul0 = taper0 * centerFalloff0;
+            const widthMul1 = taper1 * centerFalloff1;
+            const yy0 = y + (v0 - 0.5) * thickness * widthMul0;
+            const yy1 = y + (v1 - 0.5) * thickness * widthMul1;
+            const r0 = radius + radialDrift + Math.sin(v0 * Math.PI * 2 + phaseA) * thickness * 0.025 * widthMul0;
+            const r1 = radius + radialDrift + Math.sin(v1 * Math.PI * 2 + phaseB) * thickness * 0.025 * widthMul1;
+            const alpha0 = opacity * bandAlpha0 * centerFalloff0;
+            const alpha1 = opacity * bandAlpha1 * centerFalloff1;
+
+            positions.push(
+              Math.cos(a0) * r0, yy0 + yDrift, Math.sin(a0) * r0,
+              Math.cos(a1) * r0, yy0 + yDrift, Math.sin(a1) * r0,
+              Math.cos(a0) * r1, yy1 + yDrift, Math.sin(a0) * r1,
+              Math.cos(a1) * r1, yy1 + yDrift, Math.sin(a1) * r1
+            );
+            colors.push(
+              0.86, 0.78, 0.88, alpha0,
+              0.86, 0.78, 0.88, alpha0,
+              0.86, 0.78, 0.88, alpha1,
+              0.86, 0.78, 0.88, alpha1
+            );
+            indices.push(vi, vi + 1, vi + 2, vi + 1, vi + 3, vi + 2);
+            vi += 4;
+          }
+        }
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+      geo.setIndex(indices);
+      geo.computeVertexNormals();
+      return geo;
+    }
+
+    function makeSkyCloudRings() {
+      const moonDir = new THREE.Vector3(MOON_X, MOON_Y, MOON_Z).normalize();
+      const cloudDist = 13800;
+      const moonY = moonDir.y * cloudDist;
+      const baseRadius = Math.sqrt(Math.max(1, cloudDist * cloudDist - moonY * moonY));
+      const rings = [
+        { y: moonY - 1560, r: baseRadius + 180, t: 850, o: 0.08, seed: 9031 },
+        { y: moonY - 820, r: baseRadius + 70, t: 650, o: 0.11, seed: 9032 },
+        { y: moonY, r: baseRadius, t: 750, o: 0.16, seed: 9033 },
+        { y: moonY + 755, r: baseRadius - 110, t: 600, o: 0.10, seed: 9034 },
+        { y: moonY + 1530, r: baseRadius - 260, t: 950, o: 0.07, seed: 9035 }
+      ];
+
+      for (const ring of rings) {
+        const mesh = new THREE.Mesh(
+          makeWispyCloudRingGeometry(ring.y, ring.r, ring.t, ring.o, ring.seed),
+          new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity: 1.0,
+            vertexColors: true,
+            side: THREE.DoubleSide,
+            depthTest: true,
+            depthWrite: false,
+            fog: false
+          })
+        );
+        mesh.renderOrder = 0;
+        scene.add(mesh);
+      }
+    }
+    makeSkyCloudRings();
 
     /* =========================
        INPUT
@@ -3680,7 +3815,6 @@ const h = new Float32Array(mapW * mapH);
     let heroWalk = null;
     let heroRun = null;
     let heroIdle = null;
-    let fusionReactor = null;
     let heroWalkMixer = null;
     let heroRunMixer = null;
     let heroIdleMixer = null;
@@ -3774,44 +3908,6 @@ const h = new Float32Array(mapW * mapH);
       }
     }
 
-    async function loadFusionReactor() {
-      if (fusionReactor) return fusionReactor;
-      let gltf = await safeLoad('FusionReactor GLB', FUSION_REACTOR_GLB, (u) => loader.loadAsync(u));
-      if (!gltf && location.hostname.endsWith('github.io')) {
-        gltf = await safeLoad('FusionReactor GLB (fallback)', FUSION_REACTOR_GLB_FALLBACK, (u) => loader.loadAsync(u));
-      }
-      if (gltf && gltf.scene) {
-        fusionReactor = gltf.scene;
-        fusionReactor.scale.setScalar(10);
-        fusionReactor.traverse(o => {
-          if (!o.isMesh) return;
-          const mats = Array.isArray(o.material) ? o.material : [o.material];
-          const shaded = mats.map((m) => makeFusionReactorMetalMaterial(m));
-          o.material = Array.isArray(o.material) ? shaded : shaded[0];
-          o.castShadow = false;
-          o.receiveShadow = false;
-        });
-      }
-      return fusionReactor;
-    }
-
-    function placeFusionReactorAtSpawn() {
-      if (!fusionReactor) return;
-      if (!fusionReactorSpawnPos) {
-        console.warn('[spawn] Fusion reactor marker #FF0000 not found; reactor placement skipped');
-        return;
-      }
-      const sourcePos = fusionReactorSpawnPos;
-      const groundY = Math.max(heightAtWorld(sourcePos.x, sourcePos.z), SEA_LEVEL);
-      fusionReactor.position.set(sourcePos.x, 0, sourcePos.z);
-      fusionReactor.updateMatrixWorld(true);
-      const bbox = new THREE.Box3().setFromObject(fusionReactor);
-      const yOffset = groundY - bbox.min.y;
-      fusionReactor.position.y += yOffset;
-      fusionReactor.updateMatrixWorld(true);
-      if (fusionReactor.parent !== levelRoot) levelRoot.add(fusionReactor);
-    }
-
     function setHeroMode(isRunning, moving) {
       ensureHeroReady();
       if (!heroWalk || !heroRun) return;
@@ -3858,28 +3954,6 @@ const h = new Float32Array(mapW * mapH);
       return { x: 0, z: 0 };
     }
 
-    function findFusionReactorSpawn(data) {
-      let hitCount = 0;
-      let sumX = 0;
-      let sumY = 0;
-
-      for (let y = 0; y < mapH; y++) {
-        for (let x = 0; x < mapW; x++) {
-          const p = (y * mapW + x) * 4;
-          const r = data[p], g = data[p + 1], b = data[p + 2], a = data[p + 3];
-          if (!isFusionReactorSpawnPixel(r, g, b, a)) continue;
-          sumX += x;
-          sumY += y;
-          hitCount++;
-        }
-      }
-
-      if (!hitCount) return null;
-      const cx = sumX / hitCount;
-      const cy = sumY / hitCount;
-      return { x: cx * cell - halfW + cell * 0.5, z: cy * cell - halfH + cell * 0.5 };
-    }
-
     /* =========================
        PLAYER STATE
     ========================= */
@@ -3889,7 +3963,6 @@ const h = new Float32Array(mapW * mapH);
     const vel = new THREE.Vector3();
     const playerPos = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 6);
     const spawnPos = new THREE.Vector3();
-    let fusionReactorSpawnPos = null;
 
     /* =========================
        DEATH SYSTEM (DROWNING v1)
@@ -4053,7 +4126,6 @@ const h = new Float32Array(mapW * mapH);
 
       // Marker/object extraction should use original pixels; height derivation mutates channels.
       const sp = findPlayerSpawn(dataOriginal);
-      const frSpawn = findFusionReactorSpawn(dataOriginal);
 
       const derived = deriveHeightsAndWater(dataForHeights);
       heights = derived.heights;
@@ -4076,15 +4148,6 @@ const h = new Float32Array(mapW * mapH);
       playerPos.set(sp.x, py, sp.z);
 
       spawnPos.copy(playerPos); // ✅ remember spawn for respawn
-      fusionReactorSpawnPos = frSpawn ? new THREE.Vector3(frSpawn.x, 0, frSpawn.z) : null;
-      if (fusionReactorSpawnPos) {
-        console.info('[spawn] Fusion reactor marker found at', fusionReactorSpawnPos.x.toFixed(2), fusionReactorSpawnPos.z.toFixed(2));
-      } else {
-        console.warn('[spawn] No #FF0000 fusion reactor marker found in map.png; reactor placement skipped');
-      }
-
-      await loadFusionReactor();
-      placeFusionReactorAtSpawn();
 
       vel.set(0, 0, 0);
       grounded = false;
@@ -4470,7 +4533,6 @@ const h = new Float32Array(mapW * mapH);
       sunDirWorld.copy(sun.position).normalize();
       sunDirView.copy(sunDirWorld).transformDirection(camera.matrixWorldInverse);
       for (const u of heroSunUniforms) u.value.copy(sunDirView);
-      for (const u of fusionSunUniforms) u.value.copy(sunDirView);
 
 	      sun.color.setHex(MOON_LIGHT_COLOR);
 	      sun.intensity = MOON_LIGHT_INTENSITY;
