@@ -1505,6 +1505,9 @@
 
     const PLAYER_RADIUS = 0.38 * PLAYER_SCALE;
     const PLAYER_CAPSULE_H = 1.45 * PLAYER_SCALE;
+    const PLAYER_CHARACTER_RADIUS_DEFAULT = 0.55;
+    const MONSTER_CHARACTER_RADIUS_DEFAULT = 0.85;
+    const CHARACTER_COLLIDER_BUFFER = 0.06;
     const DOWN_FOLLOW_SPEED = 26.0 * PLAYER_SCALE;
     const MAX_STEP_UP = 0.55 * PLAYER_SCALE;
 
@@ -1523,7 +1526,7 @@
        SEA
     ========================= */
     let SEA_LEVEL = 0.0;
-    const WATER_PLANE_Y = -10000.0;
+    const WATER_LEVEL_CLEARANCE = 6.0;
     const FLOOR_Y = -99999;
 
     /* Sky/water size sync */
@@ -1765,9 +1768,9 @@
     ]);
 
     /* Sea */
-    const TOON_RAMP_SEA_RED = makeToonRampWeighted(
-      ['#120506', '#2a0809', '#5a1213', '#b3231f', '#ff3a2a'],
-      [0.10, 0.26, 0.28, 0.22, 0.14]
+    const TOON_RAMP_SKY_WATER = makeToonRampWeighted(
+      ['#171326', '#242347', '#313262', '#4d568a', '#8796c8'],
+      [0.12, 0.28, 0.28, 0.20, 0.12]
     );
 
     /* =========================
@@ -2199,17 +2202,19 @@
       return geo;
     }
 
+    const skyCloudRings = [];
+
     function makeSkyCloudRings() {
       const moonDir = new THREE.Vector3(MOON_X, MOON_Y, MOON_Z).normalize();
       const cloudDist = 13800;
       const moonY = moonDir.y * cloudDist;
       const baseRadius = Math.sqrt(Math.max(1, cloudDist * cloudDist - moonY * moonY));
       const rings = [
-        { y: moonY - 1560, r: baseRadius + 180, t: 850, o: 0.08, seed: 9031 },
-        { y: moonY - 820, r: baseRadius + 70, t: 650, o: 0.11, seed: 9032 },
-        { y: moonY, r: baseRadius, t: 750, o: 0.16, seed: 9033 },
-        { y: moonY + 755, r: baseRadius - 110, t: 600, o: 0.10, seed: 9034 },
-        { y: moonY + 1530, r: baseRadius - 260, t: 950, o: 0.07, seed: 9035 }
+        { y: moonY - 1560, r: baseRadius + 180, t: 850, o: 0.08, seed: 9031, speed: 0.0072 },
+        { y: moonY - 820, r: baseRadius + 70, t: 650, o: 0.11, seed: 9032, speed: -0.0048 },
+        { y: moonY, r: baseRadius, t: 750, o: 0.16, seed: 9033, speed: 0.0036 },
+        { y: moonY + 755, r: baseRadius - 110, t: 600, o: 0.10, seed: 9034, speed: -0.0064 },
+        { y: moonY + 1530, r: baseRadius - 260, t: 950, o: 0.07, seed: 9035, speed: 0.0044 }
       ];
 
       for (const ring of rings) {
@@ -2226,10 +2231,19 @@
           })
         );
         mesh.renderOrder = 0;
+        mesh.rotation.y = (ring.seed % 360) * (Math.PI / 180);
+        mesh.userData.cloudDriftSpeed = ring.speed;
+        skyCloudRings.push(mesh);
         scene.add(mesh);
       }
     }
     makeSkyCloudRings();
+
+    function updateSkyCloudRings(dt) {
+      for (const ring of skyCloudRings) {
+        ring.rotation.y += ring.userData.cloudDriftSpeed * dt;
+      }
+    }
 
     /* =========================
        INPUT
@@ -2366,10 +2380,12 @@
       const gy = (wz + halfH) / cell;
       const ix = Math.floor(gx);
       const iy = Math.floor(gy);
-      return (
+      const isMapWater = (
         isWaterPixel(ix, iy) || isWaterPixel(ix + 1, iy) || isWaterPixel(ix, iy + 1) || isWaterPixel(ix + 1, iy + 1) ||
         isWaterPixel(ix - 1, iy) || isWaterPixel(ix, iy - 1) || isWaterPixel(ix + 2, iy) || isWaterPixel(ix, iy + 2)
       );
+      if (isMapWater) return true;
+      return !!heights && heightAtWorldRaw(wx, wz) <= SEA_LEVEL;
     }
 
     function heightAtGrid(ix, iy) {
@@ -2378,9 +2394,7 @@
       return heights[idx(ix, iy)];
     }
 
-    function heightAtWorld(wx, wz) {
-      if (isWaterAtWorld(wx, wz)) return SEA_LEVEL;
-
+    function heightAtWorldRaw(wx, wz) {
       const gx = (wx + halfW) / cell;
       const gy = (wz + halfH) / cell;
       const ix = Math.floor(gx), iy = Math.floor(gy);
@@ -2388,6 +2402,11 @@
       const fy = THREE.MathUtils.clamp(gy - iy, 0, 1);
       const h00 = heightAtGrid(ix, iy), h10 = heightAtGrid(ix + 1, iy), h01 = heightAtGrid(ix, iy + 1), h11 = heightAtGrid(ix + 1, iy + 1);
       return h00 * (1 - fx) * (1 - fy) + h10 * fx * (1 - fy) + h01 * (1 - fx) * fy + h11 * fx * fy;
+    }
+
+    function heightAtWorld(wx, wz) {
+      if (isWaterAtWorld(wx, wz)) return SEA_LEVEL;
+      return heightAtWorldRaw(wx, wz);
     }
 
     function heightForRender(wx, wz) {
@@ -2445,6 +2464,7 @@ function deriveHeightsAndWater(data) {
 const h = new Float32Array(mapW * mapH);
       const wmask = new Uint8Array(mapW * mapH);
       const topMask = new Uint8Array(mapW * mapH);
+      const darkestGreenMask = new Uint8Array(mapW * mapH);
 
       let minLandG = 255;
       for (let y = 0; y < mapH; y++) {
@@ -2489,6 +2509,7 @@ const h = new Float32Array(mapW * mapH);
             const t = tRaw * (1.0 - HEIGHT_LIGHT_TAPER * tRaw);
             h[i] = t * BASE_MAX_HEIGHT * HEIGHT_MULTIPLIER;
 
+            if (g <= minLandG + 1) darkestGreenMask[i] = 1;
             if (gn >= TOP_FLAT_GN_THRESHOLD) topMask[i] = 1;
           } else {
             h[i] = NaN;
@@ -2538,13 +2559,20 @@ const h = new Float32Array(mapW * mapH);
       sm = smoothHeightsLandOnlyLocked(sm, wmask, slopeLockMask, SLOPE_PASSES);
 
       let maxH = 0;
+      let darkestGreenHeight = 0;
+      let darkestGreenCount = 0;
       for (let i = 0; i < sm.length; i++) {
         if (wmask[i]) continue;
         maxH = Math.max(maxH, sm[i]);
+        if (darkestGreenMask[i]) {
+          darkestGreenHeight = Math.max(darkestGreenHeight, sm[i]);
+          darkestGreenCount++;
+        }
       }
       MAX_LAND_HEIGHT = maxH;
+      const seaLevel = (darkestGreenCount > 0 ? darkestGreenHeight : 0) + WATER_LEVEL_CLEARANCE;
 
-      return { heights: sm, waterMask: wmask };
+      return { heights: sm, waterMask: wmask, seaLevel };
     }
 
     function smoothHeightsLandOnly(src, wmask, passes = 2) {
@@ -2671,11 +2699,8 @@ const h = new Float32Array(mapW * mapH);
       const geo = new THREE.PlaneGeometry(WATER_PLANE_SIZE, WATER_PLANE_SIZE, 1, 1);
       geo.rotateX(-Math.PI / 2);
 
-      const mat = new THREE.MeshToonMaterial({
-        color: 0xffffff,
-        gradientMap: TOON_RAMP_SEA_RED,
-        emissive: 0x2a0000,
-        emissiveIntensity: 0.55,
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x343a78,
         fog: true,
         transparent: false,
         depthWrite: true,
@@ -2683,7 +2708,7 @@ const h = new Float32Array(mapW * mapH);
       });
 
       worldSeaPlane = new THREE.Mesh(geo, mat);
-      worldSeaPlane.position.set(0, WATER_PLANE_Y, 0);
+      worldSeaPlane.position.set(0, SEA_LEVEL, 0);
       worldSeaPlane.renderOrder = 2;
       levelRoot.add(worldSeaPlane);
     }
@@ -2810,7 +2835,7 @@ const h = new Float32Array(mapW * mapH);
           closestPtsSegSeg(cap.a, cap.b, c.a, c.b, _cpA, _cpB);
           _nrm.subVectors(_cpA, _cpB);
           const d2 = _nrm.lengthSq();
-          const rr = cap.r + c.r;
+          const rr = c.r + (c.tag === 'tree-trunk' ? FIR_TRUNK_COLLIDER_BUFFER : cap.r);
           if (d2 >= rr * rr || d2 < 1e-10) continue;
 
           const d = Math.sqrt(d2);
@@ -2873,7 +2898,7 @@ const h = new Float32Array(mapW * mapH);
         const cz = c.a.z;
         const dx = pos.x - cx;
         const dz = pos.z - cz;
-        const rr = radius + c.r;
+        const rr = c.r + Math.min(radius, FIR_TRUNK_COLLIDER_BUFFER);
         const d2 = dx * dx + dz * dz;
         if (d2 >= rr * rr) continue;
 
@@ -2895,14 +2920,60 @@ const h = new Float32Array(mapW * mapH);
       return blocked;
     }
 
+    function resolveCharacterCircleCollision(posA, radiusA, posB, radiusB) {
+      if (!posA || !posB) return false;
+
+      const dx = posA.x - posB.x;
+      const dz = posA.z - posB.z;
+      const rr = radiusA + radiusB;
+      const d2 = dx * dx + dz * dz;
+      if (d2 >= rr * rr) return false;
+
+      let nx = 1;
+      let nz = 0;
+      let d = 0;
+      if (d2 > 1e-8) {
+        d = Math.sqrt(d2);
+        nx = dx / d;
+        nz = dz / d;
+      }
+
+      const push = (rr - d) * 0.5;
+      posA.x += nx * push;
+      posA.z += nz * push;
+      posB.x -= nx * push;
+      posB.z -= nz * push;
+      return true;
+    }
+
+    function resolvePlayerMonsterCollision() {
+      if (!monsterRoot.visible) return false;
+      const separated = resolveCharacterCircleCollision(
+        playerPos,
+        playerCharacterRadius,
+        monsterRoot.position,
+        monsterCharacterRadius
+      );
+      if (!separated) return false;
+
+      playerPos.x = THREE.MathUtils.clamp(playerPos.x, -halfW + 1, halfW - 1);
+      playerPos.z = THREE.MathUtils.clamp(playerPos.z, -halfH + 1, halfH - 1);
+      monsterRoot.position.x = THREE.MathUtils.clamp(monsterRoot.position.x, -halfW + 1, halfW - 1);
+      monsterRoot.position.z = THREE.MathUtils.clamp(monsterRoot.position.z, -halfH + 1, halfH - 1);
+      playerPos.y = Math.max(playerPos.y, heightAtWorld(playerPos.x, playerPos.z) + PLAYER_EYE_HEIGHT);
+      monsterRoot.position.y = Math.max(heightAtWorld(monsterRoot.position.x, monsterRoot.position.z), SEA_LEVEL);
+      return true;
+    }
+
     /* =========================
        TREES (PROCEDURAL DOUGLAS FIR)
     ========================= */
     const FIR_HEIGHT = 42.0;
     const FIR_TRUNK_RADIUS_BASE = 0.6;
     const FIR_TRUNK_RADIUS_TOP = 0.06;
-    const FIR_TRUNK_COLLIDER_RADIUS_MUL = 1.15;
+    const FIR_TRUNK_COLLIDER_RADIUS_MUL = 1.0;
     const FIR_TRUNK_COLLIDER_HEIGHT_MUL = 0.82;
+    const FIR_TRUNK_COLLIDER_BUFFER = 0.08;
     const FIR_TRUNK_RADIAL_SEGMENTS = 5;
     const FIR_TRUNK_HEIGHT_SEGMENTS = 8;
     const FIR_BRANCH_START = 0.35;
@@ -2950,7 +3021,7 @@ const h = new Float32Array(mapW * mapH);
     const FIR_TWIG_LENGTH = 3.4;
     const FIR_TWIG_RADIUS_BASE = 0.055;
     const FIR_TWIG_RADIUS_TIP = 0.012;
-    const MONSTER_BODY_RADIUS = 1.65;
+    const MONSTER_BODY_RADIUS = 0.08;
 
     let treeInstancesMesh = null;
     let treeTemplateGeometry = null;
@@ -3890,12 +3961,25 @@ const h = new Float32Array(mapW * mapH);
     const monsterDir = new THREE.Vector3();
     let monsterPickTimer = 0;
     let monsterRandState = 0x51f15e;
+    let playerCharacterRadius = PLAYER_CHARACTER_RADIUS_DEFAULT;
+    let monsterCharacterRadius = MONSTER_CHARACTER_RADIUS_DEFAULT;
+    const characterMeasureBox = new THREE.Box3();
+    const characterMeasureSize = new THREE.Vector3();
 
     function monsterRand() {
       monsterRandState += 0x6D2B79F5;
       let x = Math.imul(monsterRandState ^ (monsterRandState >>> 15), 1 | monsterRandState);
       x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
       return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    }
+
+    function measuredCharacterRadius(root, fallbackRadius) {
+      if (!root) return fallbackRadius;
+      characterMeasureBox.setFromObject(root);
+      characterMeasureBox.getSize(characterMeasureSize);
+      const diameter = Math.max(characterMeasureSize.x, characterMeasureSize.z);
+      if (!Number.isFinite(diameter) || diameter <= 0) return fallbackRadius;
+      return Math.max(0.05, diameter * 0.5 + CHARACTER_COLLIDER_BUFFER);
     }
 
     function applyCharacterShading(root) {
@@ -3980,6 +4064,11 @@ const h = new Float32Array(mapW * mapH);
         playerRunMixer = null;
         playerRunAction = null;
       }
+
+      playerCharacterRadius = measuredCharacterRadius(
+        playerIdle || playerWalk || playerRun,
+        PLAYER_CHARACTER_RADIUS_DEFAULT
+      );
     }
 
     function placeMonsterNextToPlayer() {
@@ -4046,6 +4135,10 @@ const h = new Float32Array(mapW * mapH);
       }
 
       monsterRoot.visible = !!(monsterIdle || monsterWalk);
+      monsterCharacterRadius = measuredCharacterRadius(
+        monsterIdle || monsterWalk,
+        MONSTER_CHARACTER_RADIUS_DEFAULT
+      );
       placeMonsterNextToPlayer();
       pickMonsterTarget();
     }
@@ -4072,6 +4165,9 @@ const h = new Float32Array(mapW * mapH);
         monsterRoot.position.z += monsterDir.z * step;
         if (resolveTreeCircleCollisions(monsterRoot.position, MONSTER_BODY_RADIUS)) {
           monsterPickTimer = Math.min(monsterPickTimer, 0.35);
+        }
+        if (resolvePlayerMonsterCollision()) {
+          monsterPickTimer = Math.min(monsterPickTimer, 0.45);
         }
         monsterRoot.position.x = THREE.MathUtils.clamp(monsterRoot.position.x, -halfW + 1, halfW - 1);
         monsterRoot.position.z = THREE.MathUtils.clamp(monsterRoot.position.z, -halfH + 1, halfH - 1);
@@ -4288,8 +4384,6 @@ const h = new Float32Array(mapW * mapH);
       halfW = sizeX / 2;
       halfH = sizeZ / 2;
 
-      SEA_LEVEL = WATER_PLANE_Y;
-
       const c = document.createElement('canvas');
       c.width = mapW;
       c.height = mapH;
@@ -4305,6 +4399,7 @@ const h = new Float32Array(mapW * mapH);
       const derived = deriveHeightsAndWater(dataForHeights);
       heights = derived.heights;
       waterMask = derived.waterMask;
+      SEA_LEVEL = derived.seaLevel;
 
       buildTerrainMesh();
       buildWorldSeaPlane();
@@ -4479,6 +4574,7 @@ const h = new Float32Array(mapW * mapH);
         playerPos.z = THREE.MathUtils.clamp(playerPos.z, -halfH + 1, halfH - 1);
 
         const supported = resolveCollisions(playerPos);
+        resolvePlayerMonsterCollision();
 
         if (supported) supportedByCollider = true;
 
@@ -4726,8 +4822,9 @@ const h = new Float32Array(mapW * mapH);
         }
       }
 
-	      updatePlayerModelAndCamera(dt);
 	      updateMonster(dt);
+	      updatePlayerModelAndCamera(dt);
+	      updateSkyCloudRings(dt);
 
 	      renderer.render(scene, camera);
     }
