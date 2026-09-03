@@ -1526,7 +1526,7 @@
        SEA
     ========================= */
     let SEA_LEVEL = 0.0;
-    const WATER_LEVEL_CLEARANCE = 6.0;
+    const WATER_LEVEL_CLEARANCE = 20.0;
     const FLOOR_Y = -99999;
 
     /* Sky/water size sync */
@@ -2110,86 +2110,87 @@
       };
     }
 
-    function makeWispyCloudRingGeometry(y, radius, thickness, opacity, seed) {
+    function makeWispyCloudRingGeometry(y, radius, thickness, opacity, seed, foregroundOnly = false) {
       const rand = seededCloudNoise(seed);
       const positions = [];
       const colors = [];
       const indices = [];
       let vi = 0;
-      const segments = 192;
-      const verticalSegments = 10;
-      const phaseA = rand() * Math.PI * 2;
-      const phaseB = rand() * Math.PI * 2;
-      const active = [];
+      const strandCount = foregroundOnly ? 6 : 22;
+      const crossSegments = 4;
 
-      for (let i = 0; i < segments; i++) {
-        const a0 = (i / segments) * Math.PI * 2;
-        const wisp =
-          0.58 +
-          0.28 * Math.sin(a0 * 5.0 + phaseA) +
-          0.18 * Math.sin(a0 * 13.0 + phaseB) +
-          (rand() - 0.5) * 0.22;
-        active.push(wisp >= 0.48 && rand() >= 0.18 ? THREE.MathUtils.clamp(wisp, 0.35, 1.15) : 0);
-      }
+      for (let strand = 0; strand < strandCount; strand++) {
+        const isForegroundWisp = foregroundOnly;
+        const startAngle = rand() * Math.PI * 2;
+        const arcLength = THREE.MathUtils.lerp(
+          isForegroundWisp ? 0.18 : 0.12,
+          isForegroundWisp ? 0.68 : 0.54,
+          Math.pow(rand(), 1.45)
+        );
+        const steps = Math.max(8, Math.ceil(arcLength * 58));
+        const bendPhase = rand() * Math.PI * 2;
+        const shear = THREE.MathUtils.lerp(-0.18, 0.18, rand());
+        const yBase = y + THREE.MathUtils.lerp(-0.42, 0.42, rand()) * thickness;
+        const rBase = radius + THREE.MathUtils.lerp(isForegroundWisp ? -0.34 : -0.18, 0.18, rand()) * thickness;
+        const maxWidth = thickness * THREE.MathUtils.lerp(
+          isForegroundWisp ? 0.14 : 0.035,
+          isForegroundWisp ? 0.28 : 0.105,
+          rand()
+        );
+        const strandAlpha = opacity * THREE.MathUtils.lerp(
+          isForegroundWisp ? 1.85 : 0.42,
+          isForegroundWisp ? 3.15 : 1.15,
+          rand()
+        );
+        const taperPower = THREE.MathUtils.lerp(
+          isForegroundWisp ? 1.25 : 1.9,
+          isForegroundWisp ? 2.7 : 4.2,
+          rand()
+        );
+        const strandStart = vi;
 
-      let i = 0;
-      while (i < segments) {
-        while (i < segments && active[i] <= 0) i++;
-        const start = i;
-        while (i < segments && active[i] > 0) i++;
-        const end = i;
-        const run = end - start;
-        if (run <= 0) continue;
+        for (let s = 0; s <= steps; s++) {
+          const u = s / steps;
+          const taper = Math.pow(Math.sin(u * Math.PI), taperPower);
+          const angle =
+            startAngle +
+            arcLength * u +
+            Math.sin(u * Math.PI * 2 + bendPhase) * 0.012 +
+            shear * (u - 0.5) * 0.045;
+          const strandNoise =
+            Math.sin(u * Math.PI * 6 + bendPhase) * 0.5 +
+            Math.sin(u * Math.PI * 17 + bendPhase * 1.7) * 0.24;
+          const width = maxWidth * taper * THREE.MathUtils.clamp(0.86 + strandNoise * 0.18, 0.35, 1.25);
+          const centerY = yBase + strandNoise * thickness * 0.018;
+          const centerR = rBase + Math.sin(u * Math.PI * 4 + bendPhase) * thickness * 0.025;
 
-        const taperIn = Math.max(1.2, Math.min(run * 0.48, 2.0 + rand() * 9.0));
-        const taperOut = Math.max(1.2, Math.min(run * 0.48, 2.0 + rand() * 9.0));
-        const taperPowerIn = THREE.MathUtils.lerp(1.15, 3.4, rand());
-        const taperPowerOut = THREE.MathUtils.lerp(1.15, 3.4, rand());
-        const yDrift = (rand() - 0.5) * thickness * 0.08;
-        const radialDrift = (rand() - 0.5) * thickness * 0.10;
+          for (let c = 0; c <= crossSegments; c++) {
+            const v = c / crossSegments;
+            const across = (v - 0.5) * 2.0;
+            const edgeFade = Math.pow(Math.max(0, 1.0 - Math.abs(across)), 0.72);
+            const yy = centerY + across * width;
+            const rr = centerR + across * width * 0.12;
+            const alpha = strandAlpha * taper * edgeFade;
 
-        for (let s = start; s < end; s++) {
-          const along0 = s - start;
-          const along1 = s + 1 - start;
-          const edgeFade0 = Math.min(1, along0 / taperIn, (run - along0) / taperOut);
-          const edgeFade1 = Math.min(1, along1 / taperIn, (run - along1) / taperOut);
-          const taperExp0 = along0 < run * 0.5 ? taperPowerIn : taperPowerOut;
-          const taperExp1 = along1 < run * 0.5 ? taperPowerIn : taperPowerOut;
-          const taper0 = Math.pow(Math.sin(THREE.MathUtils.clamp(edgeFade0, 0, 1) * Math.PI * 0.5), taperExp0);
-          const taper1 = Math.pow(Math.sin(THREE.MathUtils.clamp(edgeFade1, 0, 1) * Math.PI * 0.5), taperExp1);
-          const a0 = (s / segments) * Math.PI * 2;
-          const a1 = ((s + 1) / segments) * Math.PI * 2;
-          const bandAlpha0 = active[s] * taper0;
-          const bandAlpha1 = active[s] * taper1;
-
-          for (let j = 0; j < verticalSegments; j++) {
-            const v0 = j / verticalSegments;
-            const v1 = (j + 1) / verticalSegments;
-            const centerFalloff0 = Math.sin(v0 * Math.PI);
-            const centerFalloff1 = Math.sin(v1 * Math.PI);
-            const widthMul0 = taper0 * centerFalloff0;
-            const widthMul1 = taper1 * centerFalloff1;
-            const yy0 = y + (v0 - 0.5) * thickness * widthMul0;
-            const yy1 = y + (v1 - 0.5) * thickness * widthMul1;
-            const r0 = radius + radialDrift + Math.sin(v0 * Math.PI * 2 + phaseA) * thickness * 0.025 * widthMul0;
-            const r1 = radius + radialDrift + Math.sin(v1 * Math.PI * 2 + phaseB) * thickness * 0.025 * widthMul1;
-            const alpha0 = opacity * bandAlpha0 * centerFalloff0;
-            const alpha1 = opacity * bandAlpha1 * centerFalloff1;
-
-            positions.push(
-              Math.cos(a0) * r0, yy0 + yDrift, Math.sin(a0) * r0,
-              Math.cos(a1) * r0, yy0 + yDrift, Math.sin(a1) * r0,
-              Math.cos(a0) * r1, yy1 + yDrift, Math.sin(a0) * r1,
-              Math.cos(a1) * r1, yy1 + yDrift, Math.sin(a1) * r1
-            );
+            positions.push(Math.cos(angle) * rr, yy, Math.sin(angle) * rr);
             colors.push(
-              0.86, 0.78, 0.88, alpha0,
-              0.86, 0.78, 0.88, alpha0,
-              0.86, 0.78, 0.88, alpha1,
-              0.86, 0.78, 0.88, alpha1
+              isForegroundWisp ? 0.94 : 0.82,
+              isForegroundWisp ? 0.93 : 0.80,
+              isForegroundWisp ? 1.0 : 0.92,
+              alpha
             );
-            indices.push(vi, vi + 1, vi + 2, vi + 1, vi + 3, vi + 2);
-            vi += 4;
+            vi++;
+          }
+        }
+
+        const row = crossSegments + 1;
+        for (let s = 0; s < steps; s++) {
+          for (let c = 0; c < crossSegments; c++) {
+            const a = strandStart + s * row + c;
+            const b = a + 1;
+            const d = strandStart + (s + 1) * row + c;
+            const e = d + 1;
+            indices.push(a, d, b, b, d, e);
           }
         }
       }
@@ -2210,17 +2211,15 @@
       const moonY = moonDir.y * cloudDist;
       const baseRadius = Math.sqrt(Math.max(1, cloudDist * cloudDist - moonY * moonY));
       const rings = [
-        { y: moonY - 1560, r: baseRadius + 180, t: 850, o: 0.08, seed: 9031, speed: 0.0072 },
-        { y: moonY - 820, r: baseRadius + 70, t: 650, o: 0.11, seed: 9032, speed: -0.0048 },
-        { y: moonY, r: baseRadius, t: 750, o: 0.16, seed: 9033, speed: 0.0036 },
-        { y: moonY + 755, r: baseRadius - 110, t: 600, o: 0.10, seed: 9034, speed: -0.0064 },
-        { y: moonY + 1530, r: baseRadius - 260, t: 950, o: 0.07, seed: 9035, speed: 0.0044 }
+        { y: moonY - 1560, r: baseRadius + 180, t: 850, o: 0.08, seed: 9031, speed: 0.0086, nearSpeedMul: 1.8 },
+        { y: moonY - 820, r: baseRadius + 70, t: 650, o: 0.11, seed: 9032, speed: -0.0060, nearSpeedMul: 1.55 },
+        { y: moonY, r: baseRadius, t: 750, o: 0.16, seed: 9033, speed: 0.0048, nearSpeedMul: 1.35 },
+        { y: moonY + 755, r: baseRadius - 110, t: 600, o: 0.10, seed: 9034, speed: -0.0082, nearSpeedMul: 1.7 },
+        { y: moonY + 1530, r: baseRadius - 260, t: 950, o: 0.07, seed: 9035, speed: 0.0054, nearSpeedMul: 2.0 }
       ];
 
       for (const ring of rings) {
-        const mesh = new THREE.Mesh(
-          makeWispyCloudRingGeometry(ring.y, ring.r, ring.t, ring.o, ring.seed),
-          new THREE.MeshBasicMaterial({
+        const material = new THREE.MeshBasicMaterial({
             transparent: true,
             opacity: 1.0,
             vertexColors: true,
@@ -2228,13 +2227,26 @@
             depthTest: true,
             depthWrite: false,
             fog: false
-          })
+          });
+        const farMesh = new THREE.Mesh(
+          makeWispyCloudRingGeometry(ring.y, ring.r, ring.t, ring.o, ring.seed, false),
+          material
         );
-        mesh.renderOrder = 0;
-        mesh.rotation.y = (ring.seed % 360) * (Math.PI / 180);
-        mesh.userData.cloudDriftSpeed = ring.speed;
-        skyCloudRings.push(mesh);
-        scene.add(mesh);
+        farMesh.renderOrder = 0;
+        farMesh.rotation.y = (ring.seed % 360) * (Math.PI / 180);
+        farMesh.userData.cloudDriftSpeed = ring.speed;
+        skyCloudRings.push(farMesh);
+        scene.add(farMesh);
+
+        const nearMesh = new THREE.Mesh(
+          makeWispyCloudRingGeometry(ring.y, ring.r - ring.t * 0.28, ring.t, ring.o, ring.seed + 5000, true),
+          material.clone()
+        );
+        nearMesh.renderOrder = 0;
+        nearMesh.rotation.y = ((ring.seed + 137) % 360) * (Math.PI / 180);
+        nearMesh.userData.cloudDriftSpeed = ring.speed * ring.nearSpeedMul;
+        skyCloudRings.push(nearMesh);
+        scene.add(nearMesh);
       }
     }
     makeSkyCloudRings();
@@ -3466,6 +3478,13 @@ const h = new Float32Array(mapW * mapH);
       if (blobs.length > WORLD_DETAIL.maxTrees) {
         blobs = blobs.slice(0, WORLD_DETAIL.maxTrees);
       }
+
+      blobs = blobs.filter(blob => {
+        const wx = blob.cx * cell - halfW + cell * 0.5;
+        const wz = blob.cy * cell - halfH + cell * 0.5;
+        return heightAtWorldRaw(wx, wz) > SEA_LEVEL && !isWaterAtWorld(wx, wz);
+      });
+      if (!blobs.length) return;
 
       const geo = buildDouglasFirTemplateGeometry();
       if (!treeTemplateMaterial) {
