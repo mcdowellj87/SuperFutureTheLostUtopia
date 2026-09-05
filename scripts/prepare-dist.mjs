@@ -8,9 +8,17 @@ async function exists(path) {
   try { await stat(path); return true; } catch { return false; }
 }
 
-async function copyDirIfPresent(from, to) {
+async function copyDirIfPresent(from, to, options = {}) {
   if (!(await exists(from))) return;
-  await cp(from, to, { recursive: true, force: true });
+  await cp(from, to, {
+    recursive: true,
+    force: true,
+    filter: (src) => {
+      if (options.skipGlbs && src.toLowerCase().endsWith('.glb')) return false;
+      if (options.skipMuffinMan && src.includes(`${root}/assets/muffin_man`)) return false;
+      return true;
+    }
+  });
 }
 
 async function removeGlbsRecursive(dir) {
@@ -28,7 +36,7 @@ async function removeGlbsRecursive(dir) {
 
 await copyDirIfPresent(join(root, 'images'), join(dist, 'images'));
 await copyDirIfPresent(join(root, 'audio'), join(dist, 'audio'));
-await copyDirIfPresent(join(root, 'assets'), join(dist, 'assets'));
+await copyDirIfPresent(join(root, 'assets'), join(dist, 'assets'), { skipGlbs: true, skipMuffinMan: true });
 await rm(join(dist, 'images', '.DS_Store'), { force: true });
 await rm(join(dist, 'images', 'map.xcf'), { force: true });
 await removeGlbsRecursive(join(dist, 'assets'));
