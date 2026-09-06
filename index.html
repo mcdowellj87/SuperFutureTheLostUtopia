@@ -1095,7 +1095,7 @@
       <div class="prompt">&gt;</div>
       <div class="input" id="devConsoleInput"></div>
     </div>
-    <div class="help">Tab to close • Enter to run</div>
+    <div class="help">Tab to close • Enter to run • noclip toggles fly mode</div>
   </div>
   <div id="mfDeath" aria-hidden="true">
     <div class="panel">
@@ -1353,6 +1353,7 @@
        FILES
     ========================= */
     const MAP_URL = './images/map.png';
+    const OLD_ROOT_SITE_URL = './images/old_root_site.png';
     const PLAYER_WALK_GLB = './assets/mezza_walking.glb';
     const PLAYER_RUN_GLB = './assets/mezza_running.glb';
     const PLAYER_IDLE_GLB = './assets/mezza_idle.glb';
@@ -1469,6 +1470,8 @@
     const SPEED_WALK = 3.0;
     const SPRINT_SPEED_MODIFIER = 5;
     const SPEED_SPRINT = 16.0 * SPRINT_SPEED_MODIFIER;
+    const NOCLIP_SPEED = 42.0;
+    const NOCLIP_SPRINT_SPEED = 130.0;
 
     /* Sun arc */
     let SUN_ARC_DURATION_S = 2000.0; // realistic default (full 360)
@@ -2264,7 +2267,7 @@
     addEventListener('keydown', e => {
       keys.add(e.code);
 
-      if (e.code === 'Space') jumpBufferT = JUMP_BUFFER;
+      if (e.code === 'Space' && !noclipEnabled) jumpBufferT = JUMP_BUFFER;
     });
     addEventListener('keyup', e => keys.delete(e.code));
 
@@ -2311,6 +2314,15 @@
         glassfloorEnabled = !glassfloorEnabled;
         if (terrainMesh) terrainMesh.visible = !glassfloorEnabled;
         console.info('[cheat] glassfloor', glassfloorEnabled ? 'enabled' : 'disabled');
+      }
+      if (cmd === 'noclip') {
+        noclipEnabled = !noclipEnabled;
+        vel.set(0, 0, 0);
+        grounded = false;
+        supportedByCollider = false;
+        jumpBufferT = 0;
+        coyoteT = 0;
+        console.info('[cheat] noclip', noclipEnabled ? 'enabled' : 'disabled');
       }
     }
 
@@ -2431,6 +2443,26 @@
     function heightForRender(wx, wz) {
       if (isWaterAtWorld(wx, wz)) return FLOOR_Y;
       return heightAtWorld(wx, wz);
+    }
+
+    function findNearestDrySpawn(targetX, targetZ, maxRadius = 180) {
+      if (!heights) return { x: targetX, z: targetZ };
+      let best = null;
+      for (let r = 0; r <= maxRadius; r += 6) {
+        const steps = Math.max(12, Math.ceil((Math.PI * 2 * Math.max(r, 6)) / 6));
+        for (let i = 0; i < steps; i++) {
+          const a = (i / steps) * Math.PI * 2;
+          const x = THREE.MathUtils.clamp(targetX + Math.cos(a) * r, -halfW + 1, halfW - 1);
+          const z = THREE.MathUtils.clamp(targetZ + Math.sin(a) * r, -halfH + 1, halfH - 1);
+          if (isWaterAtWorld(x, z)) continue;
+          const h = heightAtWorldRaw(x, z);
+          if (!Number.isFinite(h) || h <= SEA_LEVEL) continue;
+          const d2 = (x - targetX) * (x - targetX) + (z - targetZ) * (z - targetZ);
+          if (!best || d2 < best.d2) best = { x, z, d2 };
+        }
+        if (best) return { x: best.x, z: best.z };
+      }
+      return { x: targetX, z: targetZ };
     }
 
     /* =========================
@@ -3119,6 +3151,188 @@ const h = new Float32Array(mapW * mapH);
         buildShorelineMist(playerPos.x, playerPos.z);
       }
       if (shorelineMistUniforms) shorelineMistUniforms.uTime.value += dt;
+    }
+
+    /* =========================
+       OLD ROOT SITE
+    ========================= */
+    let oldRootSiteGroup = null;
+    const OLD_ROOT_SITE_X = 770;
+    const OLD_ROOT_SITE_Z = 790;
+    const OLD_ROOT_SITE_FACADE_Z = -104;
+    const TEMP_SPAWN_ON_OLD_ROOT_ISLAND = true;
+
+    async function makeOldRootSiteTexture() {
+      const img = new Image();
+      img.src = OLD_ROOT_SITE_URL + '?v=' + Date.now();
+      await img.decode();
+
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+
+      const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = image.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        if (r < 8 && g < 8 && b < 8) data[i + 3] = 0;
+      }
+      ctx.putImageData(image, 0, 0);
+
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      tex.wrapS = THREE.ClampToEdgeWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    function makeOldRootPanelMaterial(baseTexture, xOffset) {
+      const tex = baseTexture.clone();
+      tex.repeat.set(1 / 3, 0.68);
+      tex.offset.set(xOffset, 0.0);
+      tex.needsUpdate = true;
+      return new THREE.MeshBasicMaterial({
+        map: tex,
+        transparent: true,
+        alphaTest: 0.08,
+        depthTest: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        side: THREE.DoubleSide,
+        fog: true
+      });
+    }
+
+    async function buildOldRootSite() {
+      if (oldRootSiteGroup) {
+        levelRoot.remove(oldRootSiteGroup);
+        oldRootSiteGroup.traverse((obj) => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) {
+            if (obj.material.map) obj.material.map.dispose();
+            obj.material.dispose();
+          }
+        });
+        oldRootSiteGroup = null;
+      }
+      if (!heights) return;
+
+      const rootX = OLD_ROOT_SITE_X;
+      const rootZ = OLD_ROOT_SITE_Z;
+      const floorY = Math.max(SEA_LEVEL + 3, heightAtWorldRaw(rootX, rootZ - 64) - 34);
+      const wallHeight = 210;
+      const backWidth = 168;
+      const sideWidth = 138;
+      const group = new THREE.Group();
+      group.position.set(rootX, floorY, rootZ);
+
+      const texture = await makeOldRootSiteTexture();
+      const backMat = makeOldRootPanelMaterial(texture, 1 / 3);
+      const leftMat = makeOldRootPanelMaterial(texture, 2 / 3);
+      const rightMat = makeOldRootPanelMaterial(texture, 0);
+
+      function panelLocalX(yaw) {
+        return { x: Math.cos(yaw), z: -Math.sin(yaw) };
+      }
+
+      function addWall(name, width, height, x, z, yaw, mat) {
+        const artGeo = new THREE.PlaneGeometry(width * 1.01, height * 1.01, 1, 1);
+        const art = new THREE.Mesh(artGeo, mat);
+        art.name = name;
+        art.position.set(x, height * 0.505, z);
+        art.rotation.y = yaw;
+        art.renderOrder = 2;
+        group.add(art);
+        return art;
+      }
+
+      const backYaw = Math.PI;
+      const sideYaw = Math.PI * 0.74;
+      const backX = panelLocalX(backYaw);
+      const hingeOverlap = 1.6;
+      const leftHinge = {
+        x: backX.x * (backWidth * 0.5 - hingeOverlap),
+        z: OLD_ROOT_SITE_FACADE_Z + backX.z * (backWidth * 0.5 - hingeOverlap)
+      };
+      const rightHinge = {
+        x: -backX.x * (backWidth * 0.5 - hingeOverlap),
+        z: OLD_ROOT_SITE_FACADE_Z - backX.z * (backWidth * 0.5 - hingeOverlap)
+      };
+      const leftX = panelLocalX(sideYaw);
+      const rightX = panelLocalX(-sideYaw);
+
+      addWall('old-root-back-wall', backWidth, wallHeight, 0, OLD_ROOT_SITE_FACADE_Z, backYaw, backMat);
+      addWall(
+        'old-root-left-wall',
+        sideWidth,
+        wallHeight * 0.92,
+        leftHinge.x + leftX.x * (sideWidth * 0.5),
+        leftHinge.z + leftX.z * (sideWidth * 0.5),
+        sideYaw,
+        leftMat
+      );
+      addWall(
+        'old-root-right-wall',
+        sideWidth,
+        wallHeight * 0.92,
+        rightHinge.x - rightX.x * (sideWidth * 0.5),
+        rightHinge.z - rightX.z * (sideWidth * 0.5),
+        -sideYaw,
+        rightMat
+      );
+
+      const floorGeo = new THREE.CircleGeometry(108, 24, 0.08 * Math.PI, 0.84 * Math.PI);
+      floorGeo.rotateX(-Math.PI / 2);
+      const floorMat = new THREE.MeshBasicMaterial({
+        color: 0x3f424b,
+        transparent: true,
+        opacity: 0.92,
+        depthTest: true,
+        depthWrite: false,
+        fog: true,
+        side: THREE.DoubleSide
+      });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.name = 'old-root-cut-floor';
+      floor.position.set(0, 0.18, OLD_ROOT_SITE_FACADE_Z + 42);
+      floor.rotation.y = Math.PI;
+      floor.renderOrder = 1;
+      group.add(floor);
+
+      const doorGeo = new THREE.PlaneGeometry(22, 42, 1, 1);
+      const doorMat = new THREE.MeshBasicMaterial({
+        color: 0x050507,
+        transparent: true,
+        opacity: 0.96,
+        depthTest: true,
+        depthWrite: true,
+        fog: false,
+        side: THREE.DoubleSide
+      });
+      const door = new THREE.Mesh(doorGeo, doorMat);
+      door.name = 'old-root-door-shadow';
+      door.position.set(0, 30, OLD_ROOT_SITE_FACADE_Z - 0.24);
+      door.rotation.y = Math.PI;
+      door.renderOrder = 2;
+      group.add(door);
+
+      oldRootSiteGroup = group;
+      levelRoot.add(oldRootSiteGroup);
+    }
+
+    function isInsideOldRootSiteReserve(wx, wz) {
+      const dx = wx - OLD_ROOT_SITE_X;
+      const dz = wz - OLD_ROOT_SITE_Z;
+      return dx * dx + dz * dz < 180 * 180;
     }
 
     /* =========================
@@ -3878,7 +4092,7 @@ const h = new Float32Array(mapW * mapH);
       blobs = blobs.filter(blob => {
         const wx = blob.cx * cell - halfW + cell * 0.5;
         const wz = blob.cy * cell - halfH + cell * 0.5;
-        return heightAtWorldRaw(wx, wz) > SEA_LEVEL && !isWaterAtWorld(wx, wz);
+        return heightAtWorldRaw(wx, wz) > SEA_LEVEL && !isWaterAtWorld(wx, wz) && !isInsideOldRootSiteReserve(wx, wz);
       });
       if (!blobs.length) return;
 
@@ -4226,6 +4440,250 @@ const h = new Float32Array(mapW * mapH);
       const centerY = median(centerYPx);
 
       return { startX: minX, widthPx, centerY };
+    }
+
+    /* =========================
+       SEAWALL (TALL WALL FROM RED PATH)
+    ========================= */
+    let seawallGroup = null;
+
+    const SEAWALL_HEIGHT = (PLAYER_CAPSULE_H + PLAYER_RADIUS * 2.0) * 1.33;
+    const SEAWALL_THICKNESS = 8.0;
+    const SEAWALL_SAMPLE_STEP = 9;
+    const SEAWALL_MIN_PATH_PIXELS = 80;
+    const SEAWALL_MIN_EXTENT_PX = 120;
+
+    function isSeawallPathPixel(r, g, b, a) {
+      if (a < 16) return false;
+      return r >= 170 && g <= 70 && b <= 70;
+    }
+
+    function collectSeawallPathsFromBitmap(data) {
+      const mask = new Uint8Array(mapW * mapH);
+      const redIndices = [];
+
+      for (let y = 0; y < mapH; y++) {
+        for (let x = 0; x < mapW; x++) {
+          const i = idx(x, y);
+          const p = i * 4;
+          if (isSeawallPathPixel(data[p], data[p + 1], data[p + 2], data[p + 3])) {
+            mask[i] = 1;
+            redIndices.push(i);
+          }
+        }
+      }
+
+      const seen = new Uint8Array(mapW * mapH);
+      const paths = [];
+      const stack = [];
+
+      function addComponent(startI) {
+        stack.length = 0;
+        stack.push(startI);
+        seen[startI] = 1;
+
+        const points = [];
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+        while (stack.length) {
+          const i = stack.pop();
+          const x = i % mapW;
+          const y = (i / mapW) | 0;
+          points.push({ x, y });
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+
+          for (let oy = -1; oy <= 1; oy++) {
+            for (let ox = -1; ox <= 1; ox++) {
+              if (ox === 0 && oy === 0) continue;
+              const nx = x + ox;
+              const ny = y + oy;
+              if (nx < 0 || nx >= mapW || ny < 0 || ny >= mapH) continue;
+              const ni = idx(nx, ny);
+              if (!mask[ni] || seen[ni]) continue;
+              seen[ni] = 1;
+              stack.push(ni);
+            }
+          }
+        }
+
+        const extent = Math.max(maxX - minX, maxY - minY);
+        if (points.length < SEAWALL_MIN_PATH_PIXELS || extent < SEAWALL_MIN_EXTENT_PX) return;
+
+        let start = points[0];
+        for (const p of points) {
+          if (p.y < start.y || (p.y === start.y && p.x < start.x)) start = p;
+        }
+
+        const remaining = new Set(points.map(p => idx(p.x, p.y)));
+        const ordered = [];
+        let cur = start;
+        while (remaining.size) {
+          ordered.push(cur);
+          remaining.delete(idx(cur.x, cur.y));
+
+          let best = null;
+          let bestD2 = Infinity;
+          for (const ni of remaining) {
+            const nx = ni % mapW;
+            const ny = (ni / mapW) | 0;
+            const dx = nx - cur.x;
+            const dy = ny - cur.y;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < bestD2) {
+              bestD2 = d2;
+              best = { x: nx, y: ny };
+            }
+          }
+          if (!best || bestD2 > 36) break;
+          cur = best;
+        }
+
+        const sampled = [];
+        for (let i = 0; i < ordered.length; i += SEAWALL_SAMPLE_STEP) {
+          const p = ordered[i];
+          sampled.push(new THREE.Vector2(p.x * cell - halfW + cell * 0.5, p.y * cell - halfH + cell * 0.5));
+        }
+        if (ordered.length > 1) {
+          const p = ordered[ordered.length - 1];
+          sampled.push(new THREE.Vector2(p.x * cell - halfW + cell * 0.5, p.y * cell - halfH + cell * 0.5));
+        }
+        const simp = simplifyOpenPathRDP2D(sampled, 1.6);
+        if (simp.length > 1) paths.push(simp);
+      }
+
+      for (const i of redIndices) {
+        if (!seen[i]) addComponent(i);
+      }
+      return paths;
+    }
+
+    function simplifyOpenPathRDP2D(points, eps) {
+      if (points.length <= 2) return points;
+
+      function distPointToSeg(p, a, b) {
+        const vx = b.x - a.x, vy = b.y - a.y;
+        const wx = p.x - a.x, wy = p.y - a.y;
+        const c1 = vx * wx + vy * wy;
+        if (c1 <= 0) return Math.hypot(p.x - a.x, p.y - a.y);
+        const c2 = vx * vx + vy * vy;
+        if (c2 <= c1) return Math.hypot(p.x - b.x, p.y - b.y);
+        const t = c1 / c2;
+        const px = a.x + t * vx;
+        const py = a.y + t * vy;
+        return Math.hypot(p.x - px, p.y - py);
+      }
+
+      function rdp(arr) {
+        if (arr.length <= 2) return arr;
+        const a = arr[0], b = arr[arr.length - 1];
+        let maxD = -1, idxMax = -1;
+        for (let i = 1; i < arr.length - 1; i++) {
+          const d = distPointToSeg(arr[i], a, b);
+          if (d > maxD) { maxD = d; idxMax = i; }
+        }
+        if (maxD > eps) {
+          const left = rdp(arr.slice(0, idxMax + 1));
+          const right = rdp(arr.slice(idxMax));
+          return left.slice(0, -1).concat(right);
+        }
+        return [a, b];
+      }
+
+      return rdp(points);
+    }
+
+    function clearSeawall() {
+      if (!seawallGroup) return;
+      levelRoot.remove(seawallGroup);
+      seawallGroup.traverse(obj => {
+        if (obj.isMesh) {
+          obj.geometry.dispose();
+          obj.material.dispose();
+        }
+      });
+      seawallGroup = null;
+    }
+
+    function buildSeawallFromBitmap(data) {
+      clearSeawall();
+      const paths = collectSeawallPathsFromBitmap(data);
+      if (!paths.length) return;
+
+      let segmentCount = 0;
+      for (const path of paths) {
+        for (let i = 0; i < path.length - 1; i++) {
+          const a = path[i];
+          const b = path[i + 1];
+          if (Math.hypot(b.x - a.x, b.y - a.y) >= 0.5) segmentCount++;
+        }
+      }
+      if (!segmentCount) return;
+
+      const group = new THREE.Group();
+      group.name = 'seawall';
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x17131a,
+        roughness: 0.96,
+        metalness: 0.0,
+        emissive: 0x08050b,
+        emissiveIntensity: 0.25
+      });
+      const mesh = new THREE.InstancedMesh(geo, mat, segmentCount);
+      mesh.name = 'seawall-segments';
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.renderOrder = 3;
+      group.add(mesh);
+
+      const m = new THREE.Matrix4();
+      const p = new THREE.Vector3();
+      const s = new THREE.Vector3();
+      const q = new THREE.Quaternion();
+      const e = new THREE.Euler(0, 0, 0, 'YXZ');
+      let segmentIndex = 0;
+
+      for (const path of paths) {
+        for (let i = 0; i < path.length - 1; i++) {
+          const a = path[i];
+          const b = path[i + 1];
+          const dx = b.x - a.x;
+          const dz = b.y - a.y;
+          const len = Math.hypot(dx, dz);
+          if (len < 0.5) continue;
+
+          const mx = (a.x + b.x) * 0.5;
+          const mz = (a.y + b.y) * 0.5;
+          const baseY = SEA_LEVEL;
+
+          p.set(mx, baseY + SEAWALL_HEIGHT * 0.5, mz);
+          e.set(0, Math.atan2(dx, dz), 0);
+          q.setFromEuler(e);
+          s.set(SEAWALL_THICKNESS, SEAWALL_HEIGHT, len + SEAWALL_THICKNESS * 0.5);
+          m.compose(p, q, s);
+          mesh.setMatrixAt(segmentIndex++, m);
+
+          colliders.push({
+            type: 'box',
+            min: new THREE.Vector3(
+              Math.min(a.x, b.x) - SEAWALL_THICKNESS * 0.75,
+              baseY,
+              Math.min(a.y, b.y) - SEAWALL_THICKNESS * 0.75
+            ),
+            max: new THREE.Vector3(
+              Math.max(a.x, b.x) + SEAWALL_THICKNESS * 0.75,
+              baseY + SEAWALL_HEIGHT,
+              Math.max(a.y, b.y) + SEAWALL_THICKNESS * 0.75
+            ),
+            tag: 'seawall'
+          });
+        }
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+
+      seawallGroup = group;
+      levelRoot.add(seawallGroup);
     }
 
     function buildBridgePrism(band) {
@@ -4645,10 +5103,12 @@ const h = new Float32Array(mapW * mapH);
     ========================= */
     const forwardV = new THREE.Vector3();
     const rightV = new THREE.Vector3();
+    const noclipForwardV = new THREE.Vector3();
     const wish = new THREE.Vector3();
     const vel = new THREE.Vector3();
     const playerPos = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 6);
     const spawnPos = new THREE.Vector3();
+    let noclipEnabled = false;
 
     /* =========================
        DEATH SYSTEM (DROWNING v1)
@@ -4829,11 +5289,16 @@ const h = new Float32Array(mapW * mapH);
 
       const bridgeBand = collectBridgeBandFromBitmap(dataOriginal);
       buildBridgePrism(bridgeBand);
+      buildSeawallFromBitmap(dataOriginal);
+      await buildOldRootSite();
 
       rebuildColliderGrid();
 
-      const py = Math.max(heightAtWorld(sp.x, sp.z), SEA_LEVEL) + PLAYER_EYE_HEIGHT;
-      playerPos.set(sp.x, py, sp.z);
+      const spawnTarget = TEMP_SPAWN_ON_OLD_ROOT_ISLAND
+        ? findNearestDrySpawn(OLD_ROOT_SITE_X, OLD_ROOT_SITE_Z - 430)
+        : sp;
+      const py = Math.max(heightAtWorld(spawnTarget.x, spawnTarget.z), SEA_LEVEL) + PLAYER_EYE_HEIGHT;
+      playerPos.set(spawnTarget.x, py, spawnTarget.z);
 
       spawnPos.copy(playerPos); // ✅ remember spawn for respawn
       buildShorelineMist(playerPos.x, playerPos.z);
@@ -4927,6 +5392,36 @@ const h = new Float32Array(mapW * mapH);
       wish.addScaledVector(forwardV, f);
       wish.addScaledVector(rightV, s);
       if (wish.lengthSq() > 0) wish.normalize();
+
+      if (noclipEnabled) {
+        const upInput = (keys.has('Space') ? 1 : 0) - ((keys.has('ControlLeft') || keys.has('ControlRight') || keys.has('KeyC')) ? 1 : 0);
+        const flySpeed = sprint ? NOCLIP_SPRINT_SPEED : NOCLIP_SPEED;
+
+        noclipForwardV.set(
+          -Math.sin(yaw) * Math.cos(pitch),
+          Math.sin(pitch),
+          -Math.cos(yaw) * Math.cos(pitch)
+        );
+        if (noclipForwardV.lengthSq() < 1e-8) noclipForwardV.set(0, 0, -1);
+        noclipForwardV.normalize();
+
+        wish.set(0, 0, 0);
+        wish.addScaledVector(noclipForwardV, f);
+        wish.addScaledVector(rightV, s);
+        wish.y += upInput;
+        if (wish.lengthSq() > 0) wish.normalize();
+
+        vel.copy(wish).multiplyScalar(flySpeed);
+        playerPos.addScaledVector(vel, dt);
+        playerPos.x = THREE.MathUtils.clamp(playerPos.x, -halfW + 1, halfW - 1);
+        playerPos.z = THREE.MathUtils.clamp(playerPos.z, -halfH + 1, halfH - 1);
+        grounded = false;
+        supportedByCollider = false;
+        jumpBufferT = 0;
+        coyoteT = 0;
+        footTimer = 0;
+        return;
+      }
 
       // -------------------------
       // Jump + gravity
@@ -5167,16 +5662,20 @@ const h = new Float32Array(mapW * mapH);
       // desired camera position (behind player based on yaw)
       desiredCam.set(
         playerPos.x - Math.sin(yaw) * back,
-        (heightAtWorld(playerPos.x, playerPos.z) + up),
+        (noclipEnabled ? playerPos.y - PLAYER_EYE_HEIGHT + up : heightAtWorld(playerPos.x, playerPos.z) + up),
         playerPos.z - Math.cos(yaw) * back
       );
 
       // Look-at target
-      camTarget.set(playerPos.x, heightAtWorld(playerPos.x, playerPos.z) + THIRD_LOOK_UP, playerPos.z);
+      camTarget.set(
+        playerPos.x,
+        noclipEnabled ? playerPos.y - PLAYER_EYE_HEIGHT + THIRD_LOOK_UP : heightAtWorld(playerPos.x, playerPos.z) + THIRD_LOOK_UP,
+        playerPos.z
+      );
 
       // Optional simple anti-clipping: if desiredCam is "inside ground", lift it
       const camGround = heightAtWorld(desiredCam.x, desiredCam.z) + 0.65;
-      if (desiredCam.y < camGround) desiredCam.y = camGround;
+      if (!noclipEnabled && desiredCam.y < camGround) desiredCam.y = camGround;
 
       // Smooth camera
       camera.position.lerp(desiredCam, 1.0 - Math.pow(0.000001, dt));
